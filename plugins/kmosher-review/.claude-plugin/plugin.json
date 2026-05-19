@@ -1,0 +1,11 @@
+{
+  "name": "kmosher-review",
+  "displayName": "kmosher-review",
+  "version": "0.1.0",
+  "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, and release-engineering safety. Orchestrated via /review.",
+  "author": {
+    "name": "Keith Mosher"
+  },
+  "repository": "https://github.com/kmosher/claude-plugins",
+  "license": "MIT"
+}

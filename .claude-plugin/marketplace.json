@@ -1,0 +1,19 @@
+{
+  "name": "kmosher",
+  "owner": {
+    "name": "Keith Mosher",
+    "url": "https://github.com/kmosher"
+  },
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "kmosher-review",
+      "source": "kmosher-review",
+      "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, and release-engineering safety. Orchestrated via /review.",
+      "category": "code-review",
+      "tags": ["code-review", "pr-review", "linting", "skills"]
+    }
+  ]
+}
