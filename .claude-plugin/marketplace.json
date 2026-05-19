@@ -10,7 +10,10 @@
   "plugins": [
     {
       "name": "kmosher-review",
-      "source": "kmosher-review",
+      "source": {
+        "source": "directory",
+        "path": "./plugins/kmosher-review"
+      },
       "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, and release-engineering safety. Orchestrated via /review.",
       "category": "code-review",
       "tags": ["code-review", "pr-review", "linting", "skills"]
