@@ -11,8 +11,9 @@
     {
       "name": "kmosher-review",
       "source": {
-        "source": "directory",
-        "path": "./plugins/kmosher-review"
+        "source": "git-subdir",
+        "url": "kmosher/claude-plugins",
+        "path": "plugins/kmosher-review"
       },
       "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, and release-engineering safety. Orchestrated via /review.",
       "category": "code-review",
