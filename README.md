@@ -29,7 +29,7 @@ Then in any repo with a current branch or PR:
 | `review-compatibility` | If the diff crosses a deploy or caller boundary | DDL/protobuf/schema changes, exported signature changes, API/config/env-var changes |
 | `review-releng` | If the diff touches a runtime service or deploy infra | Revertability, blast radius, observability gaps, rollout safety, performance |
 
-Plus the `comment-virtuoso` agent, which `review-legibility` delegates to for non-trivial comment rewrites.
+Plus the `comment-writer` agent, which `review-legibility` delegates to for non-trivial comment rewrites.
 
 ## How it differs from the built-in `/security-review`
 
