@@ -9,12 +9,7 @@ Review through a release-engineering lens: can this be deployed safely, observed
 
 ## Shared conventions (read first)
 
-Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
-
-- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults.
-- **Pattern propagation** — when you find an operational gap (missing telemetry, no kill switch, no rollback path) in one new code path, check sibling paths in the diff. The same gap usually repeats.
-- **Findings buffer** — buffer findings to a JSONL file, dedupe and self-verify before emitting.
-- **Comment body schema** — the canonical render shape for findings posted to GitHub.
+Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md overlay, pattern propagation, and the findings buffer. Operational gaps (missing telemetry, no kill switch, no rollback path) usually repeat across sibling code paths in the diff; pattern propagation is the rule that catches them.
 
 ## When to Use
 

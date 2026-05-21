@@ -9,14 +9,7 @@ Find bugs that domain experts catch and automated reviewers miss. Forces reading
 
 ## Shared conventions (read first)
 
-Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
-
-- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults.
-- **Pattern propagation** — when a finding crystallizes, scan all other diff files for the same pattern before moving on.
-- **Findings buffer** — buffer findings to a JSONL file, dedupe and self-verify before emitting.
-- **Comment body schema** — the canonical render shape for findings posted to GitHub.
-
-The bug-shaped patterns in this skill (missing error handling, predicate-at-evaluation-site bugs, mutation of caller state, etc.) almost always repeat across the diff. The pattern-propagation rule is especially load-bearing here.
+Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md overlay, pattern propagation, and the findings buffer. Pattern propagation is especially load-bearing here: bug-shaped findings (missing error handling, predicate-at-evaluation-site bugs, mutation of caller state) almost always repeat across the diff.
 
 ## When to Use
 

@@ -326,13 +326,19 @@ Each finding line must include the GitHub permalink built by the lens subagent
 (full SHA, ≥1 line context above/below). Do not strip permalinks; they make
 the report directly clickable on GitHub.
 
-Render each finding using the schema documented in
-`plugins/kmosher-review/skills/SHARED_CONVENTIONS.md` (section 4: Comment body
-schema). Key rules: plain-text severity labels (no emoji); collapse
-`why_it_matters` into a `<details>` block when it adds context beyond the
-description, otherwise omit; for self-contained fixes ≤ 5 lines, append a
-GitHub `suggestion` block at the top level of the finding (NOT inside
-`<details>`).
+#### Finding render schema
+
+Plain-text severity labels (no emoji). Collapse `why_it_matters` into a
+`<details>` block when it adds context beyond the description; otherwise
+omit. For self-contained fixes ≤ 5 lines, append a GitHub `suggestion` block
+at the **top level** of the finding (NOT nested inside `<details>` — GitHub
+won't render suggestions inside details). Append a machine-readable trailer
+as the last line of every rendered finding:
+`<!-- kmosher-review: severity=<sev> confidence=<conf> lens=<lens> -->`
+
+If `REVIEW.md` (from Step 1) defines its own severity labels
+(e.g. `Important` / `Nit` / `Pre-existing` instead of P0–P3), use those —
+`REVIEW.md` overrides the default tier names.
 
 Final report format:
 
@@ -381,10 +387,6 @@ Verifier: <n findings audited; n dropped as false-positive/settled/nitpick; n do
 
 [What to fix first; what to defer; whether to re-run any lens after fixes]
 ```
-
-If `REVIEW.md` (from Step 1) defines its own severity labels (e.g.
-`Important` / `Nit` / `Pre-existing` instead of P0–P3), use those labels in
-the rendered findings — `REVIEW.md` overrides the default tier names.
 
 If no findings survived verification: say so explicitly. The PR is ready to merge from these lenses' perspectives. Mention how many findings the verifier dropped so the user knows the verifier ran and did its job.
 

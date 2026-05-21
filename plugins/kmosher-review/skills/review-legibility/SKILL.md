@@ -9,12 +9,7 @@ Review for **readability**, not correctness. Find code that makes a fresh reader
 
 ## Shared conventions (read first)
 
-Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
-
-- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults (especially severity calibration and the nit cap).
-- **Pattern propagation** — when a legibility finding crystallizes, scan all other diff files for the same pattern (the same restated-in-English comment shape, the same branch-fanout shape, the same stale reference). Legibility findings repeat *more* than bug findings, not less.
-- **Findings buffer** — buffer findings to a JSONL file. The 10-finding cap is enforced over the buffer, not as you go.
-- **Comment body schema** — the canonical render shape for findings posted to GitHub.
+Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md overlay, pattern propagation, and the findings buffer. The 10-finding cap below is enforced over the buffer, not as you go.
 
 ## When to Use
 

@@ -14,12 +14,7 @@ Distinct from review-releng — that's about operational posture (revert, rollou
 
 ## Shared conventions (read first)
 
-Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
-
-- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults.
-- **Pattern propagation** — when you find a shape-compatibility issue on one endpoint/schema/message, scan all other diff files for the same shape before moving on. Sibling endpoints and migrations almost always share the same gap.
-- **Findings buffer** — buffer findings to a JSONL file, dedupe and self-verify before emitting.
-- **Comment body schema** — the canonical render shape for findings posted to GitHub.
+Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md overlay, pattern propagation, and the findings buffer. Sibling endpoints, schemas, and migrations almost always share the same compatibility gap; pattern propagation is the rule that catches them.
 
 ## When to Use
 
