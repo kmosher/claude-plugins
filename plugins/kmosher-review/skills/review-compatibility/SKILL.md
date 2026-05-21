@@ -1,6 +1,6 @@
 ---
 name: review-compatibility
-description: Use when a PR could break callers, consumers, or future code that hasn't redeployed yet — DDL changes, protobuf/Avro schemas, message formats, serialized state, API request/response shapes, function signatures of exported/public symbols, behavior changes that callers depend on, config-key/env-var renames, exit-code changes, default-value flips. Anything where "old + new code coexist briefly" or "external callers can't update atomically" applies.
+description: This skill should be used when reviewing a PR that could break callers, consumers, or future code that hasn't redeployed yet — DDL changes, protobuf/Avro schemas, message formats, serialized state, API request/response shapes, function signatures of exported/public symbols, behavior changes that callers depend on, config-key/env-var renames, exit-code changes, default-value flips. Applies anywhere "old + new code coexist briefly" or "external callers can't update atomically".
 ---
 
 # Compatibility Review

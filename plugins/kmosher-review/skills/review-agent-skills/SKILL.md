@@ -1,6 +1,6 @@
 ---
 name: review-agent-skills
-description: Use when a PR diff touches Claude Code agent skill files (`SKILL.md`, `EXAMPLE.md`, `PROMPT_TEMPLATE.md` under `*/skills/<name>/`, slash-command files under `*/commands/<name>.md`, or plugin manifests `.claude-plugin/plugin.json` / `marketplace.json`). Reviews skill-authoring quality: frontmatter schema, description-as-trigger, body voice, supporting-file references, side-effect safety, eval coverage. Distinct from `review-code` (correctness of any code in the skill) and `review-legibility` (general readability) — this lens applies rules specific to how Claude Code loads and routes skills, drawn from Anthropic's skill-creator, the official plugin-dev skill-development guide, and the Claude Code skills docs.
+description: This skill should be used when reviewing a PR diff that touches Claude Code agent skill files (`SKILL.md`, `EXAMPLE.md`, `PROMPT_TEMPLATE.md` under `*/skills/<name>/`), slash-command files under `*/commands/<name>.md`, or plugin manifests (`.claude-plugin/plugin.json` / `marketplace.json`). Reviews skill-authoring quality: frontmatter schema, description-as-trigger, body voice, supporting-file references, side-effect safety, eval coverage. Distinct from `review-code` (correctness of any code in the skill) and `review-legibility` (general readability) — this lens applies rules specific to how Claude Code loads and routes skills, drawn from Anthropic's skill-creator, the official plugin-dev skill-development guide, and the Claude Code skills docs.
 ---
 
 # Agent Skill Authoring Review
@@ -76,7 +76,7 @@ Findings get severity per the calibration below. The lens reports the named rule
 
 - **A-DESCRIPTION-USE-THIS.** Description begins with "Use this skill when…", "Load when…", "Provides…", or any first/second-person phrasing.
 - **A-DESCRIPTION-NO-TRIGGERS.** Description has zero quoted trigger phrases and zero concrete scenarios.
-- **A-BODY-SECOND-PERSON.** SKILL.md body contains "you should", "you need to", "you can", or "you must".
+- **A-BODY-SECOND-PERSON.** SKILL.md body contains **directive** second-person constructions: "you should X", "you need to X", "you must X", or instructions addressed to a "you" subject ("Then you parse the frontmatter"). Imperative ("Parse the frontmatter") is the target. *Not* a violation: rhetorical-conditional ("if you can't trace concretely…"), idiomatic phrases ("a luxury you can't afford"), or "you" in a misconception/quote/table column where the construction is paraphrasing user thought.
 - **A-BLOATED-NO-REFS.** SKILL.md >500 lines AND `references/` is empty or missing.
 - **A-ORPHAN-SUPPORT.** `references/`, `scripts/`, or `examples/` directories exist but are not mentioned anywhere in SKILL.md.
 - **A-NAME-CASE.** `name:` present but contains uppercase, underscores, spaces, or doesn't match directory name exactly.

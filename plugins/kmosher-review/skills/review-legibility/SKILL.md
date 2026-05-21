@@ -1,6 +1,6 @@
 ---
 name: review-legibility
-description: Use when reviewing a PR for readability after correctness is settled — comments that restate code, misleading names, branch fanout, iteration-history scars, stale references, comment-to-code-distance bloat, function docs describing the predicate instead of the function's purpose, tests that don't document behavior. Final pre-merge cleanup pass.
+description: This skill should be used when reviewing a PR for readability after correctness is settled — comments that restate code, misleading names, branch fanout, iteration-history scars, stale references, comment-to-code-distance bloat, function docs describing the predicate instead of the function's purpose, tests that don't document behavior. Final pre-merge cleanup pass.
 ---
 
 # Legibility Code Review

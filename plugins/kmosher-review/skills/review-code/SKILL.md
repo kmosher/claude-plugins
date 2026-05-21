@@ -1,6 +1,6 @@
 ---
 name: review-code
-description: Use when reviewing a non-trivial PR before merge to find correctness bugs — logic errors, ignored errors, panics, predicate-evaluation-site bugs, schema/shape mismatches, recursion bounds, mutated caller state, tests that pass with a buggy implementation. Especially for PRs that have had multiple prior review rounds and you want to find what they missed.
+description: This skill should be used when reviewing a non-trivial PR before merge to find correctness bugs — logic errors, ignored errors, panics, predicate-evaluation-site bugs, schema/shape mismatches, recursion bounds, mutated caller state, tests that pass with a buggy implementation. Especially valuable on PRs that have had multiple prior review rounds where earlier reviewers may have missed something.
 ---
 
 # Adversarial Code Review
@@ -27,9 +27,9 @@ errors). For whole-package sweeps, see the `modernize` CLI recipe in
 recipes there — load only the relevant language section on demand.
 
 If `/review` already ran the automated checks step, don't re-run —
-cross-reference its findings. If you're invoked directly, run the relevant
-tooling yourself before reporting bug-finding results so you can ground them
-in concrete diagnostic output rather than speculation.
+cross-reference its findings. When invoked directly, run the relevant
+tooling first so findings ground in concrete diagnostic output rather than
+speculation.
 
 ## Prioritization Hierarchy
 

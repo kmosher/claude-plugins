@@ -1,6 +1,6 @@
 ---
 name: review-releng
-description: Use when a PR touches production services or anything that could page someone — runtime services, deployment manifests, CI/release configs, auth/secrets handling, Pulumi/IaC, feature flags, runtime config, observability code, or anything on a per-request hot path. Reviews for revertability, blast radius, observability gaps, rollout safety, and performance regressions. Assumes correctness; asks whether the change can be operated.
+description: This skill should be used when reviewing a PR that touches production services or anything that could page someone — runtime services, deployment manifests, CI/release configs, auth/secrets handling, Pulumi/IaC, feature flags, runtime config, observability code, or anything on a per-request hot path. Reviews for revertability, blast radius, observability gaps, rollout safety, and performance regressions. Assumes correctness; asks whether the change can be operated.
 ---
 
 # Operational Readiness Review
