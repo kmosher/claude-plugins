@@ -83,7 +83,17 @@ Legibility critique balloons easily. Cap at 10. Forces prioritization: which 10 
 
 If fewer than 10 issues clear the bar, the reviewer should say so. Performative thoroughness is worse than honest "this is fine."
 
-## Common Misconceptions
+## Output Format
+
+Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.
+
+**Lens-specific field:** add `heuristic` (int 1–12) — which row of The Heuristics table the finding came from. Lets the coordinator and the reader trace each finding back to the test it failed.
+
+**`category` values for this lens:** `misleading` (comment claims X but code does Y; name promises wrong behavior; stale reference), `structure` (branch fanout, comment-to-code distance, function-too-big), `naming-or-docs` (generic name, doc describes predicate not purpose, untyped onramp), `duplication` (pattern repeated 3+ times, decision-logic encoded in two places), `comment-density` (lead test, mechanism restatement, hedge-and-passive), `tests-as-docs` (test name + asserts don't reveal contract).
+
+**Severity** comes from "Severity Calibration" above (`P1` actively misleads / `P2` high friction / `P3` defensible). **Confidence** follows the same low/medium/high rubric as `review-code`: distinguished by what you actually did to verify (heuristic 12 — self-verification — is mandatory before emitting).
+
+Cap is enforced over the buffer: dedupe and self-verify first, then keep the top 10 by severity. If fewer than 10 clear the bar, return what you have plus a meta note saying so.
 
 | Misconception | Reality |
 |---|---|

@@ -142,11 +142,17 @@ For each finding, re-read the cited code/config and confirm the claim. State whi
 
 ## Output Format
 
-Numbered findings. Each: severity (P0–P3), file:line or PR-level, which check/anti-pattern, what's wrong (concrete), required action (P0/P1) or suggestion (P2/P3).
+Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.
 
-For each P0/P1: propose the deployment pattern that mitigates it, the observability that would detect regression, and the rollback procedure.
+**Lens-specific fields:**
+- `check` — the named operational check that fired (e.g. `no-revert-path`, `missing-kill-switch`, `no-canary`, `unbounded-blast-radius`, `missing-observability`, `perf-regression-risk`). Lets the coordinator group findings by class.
+- `deployment_pattern` (P0/P1 only) — the rollout pattern that mitigates the risk (feature flag, canary, two-phase, shadow, etc.).
+- `observability_signal` (P0/P1 only) — the metric/log/alert that would catch the regression in production.
+- `rollback_procedure` (P0/P1 only) — exact steps to get back to prior state.
 
-If the PR passes the checklist, say so. Don't manufacture.
+**`category` values for this lens:** `revertability` (post-deploy revert path), `blast-radius` (graceful degradation, kill switch), `observability` (telemetry, logging, alerting), `rollout-safety` (canary, feature flag, two-phase), `performance` (p50/p99 risk, resource-use regression).
+
+If the PR passes the checklist, return an empty JSONL block with a meta note. Don't manufacture.
 
 ## Worked Example
 

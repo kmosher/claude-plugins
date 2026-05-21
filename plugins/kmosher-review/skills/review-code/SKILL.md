@@ -149,14 +149,16 @@ Bug-shaped patterns. Almost always real when found.
 
 ## Output Format
 
-Numbered findings. Each: severity (P0–P3), file:line ref, what's wrong (1–3 sentences, concrete), bug it would cause in a real scenario, proposed fix, confidence (low/medium/high distinguished by what the reviewer *actually did*).
+Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.
 
-**Confidence calibration:**
-- **Low** — speculated from naming or surface reading
-- **Medium** — read related code but didn't fully verify the failure path
-- **High** — read the implementation and traced an end-to-end scenario demonstrating the bug
+**`category` values for this lens:** `correctness` (logic error, off-by-one, predicate-at-evaluation-site), `error-handling` (ignored error, swallowed exception, partial cleanup), `concurrency` (lock ordering, channel deadlock, ordering assumption), `memory-or-state` (mutation of caller state, recursion bound, shared-pointer aliasing), `tests` (test that passes with a buggy implementation), `claude-md-violation` (diff violates a CLAUDE.md rule from any applicable file), `adjacent-comment-violation` (diff violates an invariant in adjacent comments).
 
-Aim for 6–15 findings. **If genuinely no novel issues**, say so with reasoning. Do not manufacture.
+**Confidence calibration** (what you actually did, not what the finding sounds like):
+- **`low`** — speculated from naming or surface reading.
+- **`medium`** — read related code but didn't fully trace the failure path.
+- **`high`** — read the implementation and traced an end-to-end scenario demonstrating the bug.
+
+Aim for 6–15 findings. **If genuinely no novel issues**, return an empty JSONL block with a meta note explaining what you checked and why nothing surfaced. Do not manufacture.
 
 ## Worked Example
 

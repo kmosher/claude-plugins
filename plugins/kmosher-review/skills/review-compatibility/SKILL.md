@@ -166,15 +166,20 @@ For each finding, re-read the migration SQL, the code that writes data, and the 
 
 ## Output Format
 
-Numbered findings. Each: severity (P0–P3), file:line or PR-level, which check/anti-pattern, what's wrong (concrete — name the locked table, the unbatched UPDATE, the missing dual-write), required action (P0/P1) or suggestion (P2/P3).
+Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.
 
-For each P0/P1: propose the migration pattern that addresses it, the deploy ordering required (which PR ships first, soak time), and the rollback procedure.
+**Lens-specific fields:**
+- `check` — the named check or anti-pattern that fired (e.g. `not-null-on-populated-table`, `column-rename-without-dual-write`, `proto-field-removal`, `cli-flag-removed`, `default-value-flip`). Lets the coordinator group findings by class.
+- `deploy_ordering` (P0/P1 only) — which PR/deploy ships first, soak time, and the second-step prerequisite.
+- `rollback_procedure` (P0/P1 only) — how to abandon mid-migration without data loss.
 
-**Output phrasing — concrete language wins:**
-- ❌ "Consider safety of this migration"
+**`category` values for this lens:** `data-shape` (DDL, message format, stored state), `interface` (exported signature, REST/gRPC shape, CLI flag, env var, config key), `behavior-semantics` (same signature, different meaning; default-value flip), `migration-mechanics` (lock duration, non-idempotent script, missing backfill).
+
+**`description` phrasing — concrete language wins:**
+- ✗ "Consider safety of this migration"
 - ✓ "`ALTER TABLE foo ADD CONSTRAINT bar NOT NULL` on a 50M-row table will hold an exclusive lock for the table-scan duration. Use `ADD CONSTRAINT bar NOT NULL NOT VALID` followed by `VALIDATE CONSTRAINT bar` (non-blocking) instead."
 
-If the PR passes the checklist, say so. Don't manufacture.
+If the PR passes the checklist, return an empty JSONL block with a meta note. Don't manufacture.
 
 ## Worked Example
 

@@ -235,29 +235,32 @@ Call `Agent(subagent_type="general-purpose", description="<lens> review", prompt
 - **Prior PR context** (from Step 1.5): paste both the "Applicable prior guidance" and "Settled issues — DO NOT re-raise" lists. The subagent treats the latter as additional settled issues.
 - **Automated findings from Step 2.5** (if run): paste them so the subagent doesn't re-surface mechanical issues. The subagent may cross-reference but should not duplicate.
 - **Build the "required upstream reading" list yourself.** The skill calls for 3–6 upstream files; do NOT expect the orchestrator to enumerate them. As the subagent, you derive the list from the diff by: (a) `grep` for imports in each changed file and pull the most-referenced module's interface/shim file; (b) `find` root + directory-level `CLAUDE.md` files for every directory in the changed-file list; (c) extract any PR/issue references from diff comments or commit messages; (d) the PR description's own "related issues" or "see also" links. Cap at 6 files total. Skip auto-generated files (`*.pb.go`, `*_gen.go`, lockfiles, etc.) as candidates.
-- **Citation format — mandatory for every finding**: include a GitHub permalink built as `https://github.com/<owner>/<repo>/blob/<full-sha>/<path>#L<start>-L<end>`. The range must include **at least 1 line of context above and below** the cited code (e.g. flagging line 42 → cite `L41-L43`; range 100–105 → cite `L99-L106`). Markdown won't render the preview correctly without the full SHA, so use the SHA from this step's input — do not invoke `git rev-parse` inside the citation string.
-- **Output format** (the subagent must return only this):
+- **Permalink field — mandatory on every finding**: every finding must include a `permalink` field (in addition to `file` and `line` from the canonical schema). Build as `https://github.com/<owner>/<repo>/blob/<full-sha>/<path>#L<start>-L<end>`. The range must include **at least 1 line of context above and below** the cited code (e.g. flagging line 42 → `L41-L43`; range 100–105 → `L99-L106`). Markdown won't render the preview correctly without the full SHA, so use the SHA from this step's input — do not invoke `git rev-parse` inside the citation string.
+- **Output format** — the subagent must return only this, structured for mechanical consumption:
+
+  ````
+  ## findings
+
+  ```jsonl
+  {"file": "...", "line": ..., "permalink": "...", "severity": "...", "confidence": "...", "category": "...", "description": "...", "why_it_matters": "...", "recommendation": "...", <lens-specific fields>}
+  {"file": "...", "line": ..., ...}
   ```
-  ## <lens> findings
-  <numbered list per the skill's output format. Each finding includes:
-   - severity (P0–P3)
-   - file:line (textual reference for skimming)
-   - permalink (https://github.com/.../blob/<full-sha>/<path>#L<start>-L<end> with ≥1 line context)
-   - what's wrong (1–3 sentences, concrete)
-   - bug it would cause in a real scenario
-   - proposed fix
-   - confidence (low/medium/high — what the subagent actually did to verify)>
 
-  ## Verified vs. inferred
-  <which finding numbers were verified by reading actual code, which were inferred from structure/naming>
+  ## upstream_reading
 
-  ## Upstream reading list (for orchestrator audit)
-  <files the subagent chose to read in full, one per line, with a 1-line "what this told me" note each>
-
-  ## Note (optional)
-  <one paragraph if the subagent has meta-observations the orchestrator should know — e.g. "diff is mostly generated code, applied skill only to handwritten files">
+  ```jsonl
+  {"path": "<path>", "told_me": "<one-line summary>"}
+  {"path": "<path>", "told_me": "<one-line summary>"}
   ```
-- **Do not** return a transcript, file dumps, or "here's what I did" narration. The orchestrator will aggregate; it only needs the findings.
+
+  ## meta
+
+  <one paragraph, free-form. Note anything the orchestrator should know: "diff is mostly generated code, applied skill only to handwritten files"; "REVIEW.md declared 3 codebase precedents; flagged none of them"; "no novel findings, what I checked was X/Y/Z".>
+  ````
+
+  The `findings` JSONL block follows the canonical finding schema from `SHARED_CONVENTIONS.md` §3 plus any lens-specific fields documented in the lens's Output Format section. If no findings survived self-verification, emit an empty `jsonl` code block and explain in `meta`.
+
+- **Do not** return a transcript, file dumps, narration, or any markdown rendering of findings. The orchestrator renders. The subagent emits raw structured data.
 
 After each subagent returns:
 
@@ -285,10 +288,10 @@ Dispatch via `Agent(subagent_type="general-purpose", description="Findings verif
 - **Goal**: audit each finding against the actual code; produce a verdict per finding. Output is folded into the final report.
 - **Repo path**: `<absolute path>`
 - **Owner/repo, full SHA**: pass through from Step 1.
-- **Findings to verify**: the concatenated `## <lens> findings` blocks from Step 4 (every lens). Number them globally.
+- **Findings to verify**: the concatenated JSONL `findings` blocks from every lens in Step 4. Assign each finding a stable global index (`<lens>:<n>`, e.g. `code:0`, `legibility:3`).
 - **Settled issues + prior guidance**: pass through from Step 1.5. The verifier uses these to mark findings that re-raise adjudicated concerns.
 - **For each finding, the verifier does**:
-  1. `Read` the file + cited lines (with a few lines of context). Confirm the cited code matches what the finding describes.
+  1. `Read` the file + cited `line` (with a few lines of context). Confirm the cited code matches the `description`.
   2. If the finding cites behavior elsewhere in the codebase, `Grep` for the same pattern. If the pattern is widespread and consistent, flag the finding as "pattern is by-design, not a regression."
   3. Check whether the cited lines are actually changed in this PR or pre-existing (`git blame` the file at the SHA; if the commit isn't in the PR's commit range, it's pre-existing).
   4. Re-score severity per the strict rubric below.
@@ -300,31 +303,40 @@ Dispatch via `Agent(subagent_type="general-purpose", description="Findings verif
   - **P3** — code quality, minor concern, test-strength issue, legibility friction.
   - **nitpick / false positive** — pre-existing, by-design, or doesn't survive re-reading. Mark and drop from the user-facing report.
 - **Output format** (only this, no transcript):
-  ```
-  ## Verifier verdicts
-  <one line per finding, in input order:
-   <global_index>: <kept | downgraded P1→P2 | downgraded P2→P3 | settled | nitpick | false-positive> — <one-sentence reason citing what the verifier did to confirm>
-  >
 
-  ## Adjusted finding counts
-  P0: <n>  P1: <n>  P2: <n>  P3: <n>  dropped: <n>
+  ````
+  ## verdicts
+
+  ```jsonl
+  {"index": "code:0", "verdict": "kept", "reason": "..."}
+  {"index": "code:1", "verdict": "downgraded", "from": "P1", "to": "P2", "reason": "..."}
+  {"index": "legibility:3", "verdict": "settled", "reason": "matches Settled-Issues #2"}
+  {"index": "compatibility:0", "verdict": "false-positive", "reason": "re-read code, claim does not hold"}
   ```
+
+  `verdict` is one of `kept`, `downgraded`, `settled`, `nitpick`, `false-positive`. Include `from` and `to` only for `downgraded`.
+
+  ## adjusted_counts
+
+  ```json
+  {"P0": <n>, "P1": <n>, "P2": <n>, "P3": <n>, "dropped": <n>}
+  ```
+  ````
 
 The orchestrator applies the verdicts in Step 5: drop findings tagged `settled`, `nitpick`, or `false-positive`; relabel severities for downgrades; preserve `kept` findings as-is.
 
-### Step 5: Aggregate and report
+### Step 5: Aggregate and render
 
-After all selected skills + the verifier have run, the orchestrator merges:
+The orchestrator now holds structured JSONL `findings` blocks from each lens (Step 4) and `verdicts` from the verifier (Step 4.5). Aggregation is mechanical:
 
-- **Apply verifier verdicts first.** Drop findings the verifier marked `settled`, `nitpick`, or `false-positive`. Relabel severities for `downgraded` findings. Keep `kept` findings as-is.
-- **Deduplicate** findings that survived. If the same code is flagged by two lenses (e.g. review-code for the bug AND review-legibility for the unclear branching), merge into a single entry, prefer the higher-severity framing, and cite both lenses in the source field.
-- **Sort** by severity (P0 → P3). Within a severity tier, group by lens in run order.
-- **Summarize** at the top: counts by severity, which lenses ran, which skipped, what the verifier dropped/downgraded.
-- **Suggest next step**: fix the P0/P1 findings, re-run the relevant lens(es) to confirm, then merge.
+- **Apply verifier verdicts first.** Drop findings whose verdict is `settled`, `nitpick`, or `false-positive`. For `downgraded` findings, set `severity` to the verdict's `to` field. Keep `kept` findings as-is.
+- **Deduplicate by `(file, line, category)`.** When two lenses flag the same cell (e.g. `review-code` flags the bug, `review-legibility` flags the unclear branching), merge into one entry: keep the higher-severity framing, concatenate the `description`s, and record both lenses in a `lenses` array on the merged finding.
+- **Sort** by severity (`P0` first), then by lens (run order), then by `file:line`.
+- **Render** each surviving finding using the Finding render schema below. This is the first time markdown enters the pipeline.
+- **Summarize** at the top: counts by severity, lenses run/skipped, verifier drop/downgrade counts.
+- **Recommend next step**: fix `P0`/`P1` findings, re-run the relevant lens(es), then merge.
 
-Each finding line must include the GitHub permalink built by the lens subagent
-(full SHA, ≥1 line context above/below). Do not strip permalinks; they make
-the report directly clickable on GitHub.
+Every finding has a `permalink` field built by the lens subagent (full SHA, ≥1 line context above/below). Use it as the clickable header for each rendered finding.
 
 #### Finding render schema
 
