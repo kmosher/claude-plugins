@@ -7,6 +7,17 @@ description: Use when reviewing a non-trivial PR before merge to find correctnes
 
 Find bugs that domain experts catch and automated reviewers miss. Forces reading the actual implementation (not just signatures), enumerating what a change does NOT cover, and grounding analysis in concrete real-world scenarios.
 
+## Shared conventions (read first)
+
+Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
+
+- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults.
+- **Pattern propagation** — when a finding crystallizes, scan all other diff files for the same pattern before moving on.
+- **Findings buffer** — buffer findings to a JSONL file, dedupe and self-verify before emitting.
+- **Comment body schema** — the canonical render shape for findings posted to GitHub.
+
+The bug-shaped patterns in this skill (missing error handling, predicate-at-evaluation-site bugs, mutation of caller state, etc.) almost always repeat across the diff. The pattern-propagation rule is especially load-bearing here.
+
 ## When to Use
 
 **Use for:** final review before merging non-trivial PRs; lifecycle/schema/invariant changes; PRs that have had several rounds of review where you want to find what they missed; code landing as a single squashed commit.

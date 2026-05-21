@@ -71,6 +71,13 @@ Run these in parallel:
 
 If the user provided a specific PR number or branch name as `$ARGUMENTS`, use that instead of the current branch.
 
+Also check for a repo-local review overlay:
+
+- `test -f REVIEW.md && cat REVIEW.md` — if present, this is the authoritative overlay for what to flag, severity calibration, codebase precedents to treat as true, and output shape. Its rules **override the defaults baked into the lens skills.**
+- If `REVIEW.md` is absent, skip silently. Falling back to skill defaults is the expected path for most repos.
+
+Cache the contents (or absence) in a variable; you'll pass it into every lens subagent in Step 4.
+
 ### Step 1.5: Prior-PR-comment mining (parallel subagent)
 
 Past PRs on the same files often contain adjudicated concerns ("we decided X
@@ -224,6 +231,7 @@ Call `Agent(subagent_type="general-purpose", description="<lens> review", prompt
 - **Diff**: paste the full unified diff (or, if huge, the file list + per-file hunk ranges and instructions to read full files from disk). The subagent will read further files itself.
 - **PR description** (if any): paste verbatim.
 - **Settled-issues list** (if the user provided one as `$ARGUMENTS`): paste verbatim, mark as DO NOT raise.
+- **Repo-local `REVIEW.md`** (from Step 1, if present): paste the file's contents verbatim under a clearly labeled heading. Instruct the subagent that `REVIEW.md` rules **override** the skill's defaults — severity calibration, what to flag, what to skip, output shape. If `REVIEW.md` declares codebase precedents (e.g. "trusted env vars", "no XSS in React unless `dangerouslySetInnerHTML`"), the subagent must NOT flag findings predicated on violating those precedents.
 - **Prior PR context** (from Step 1.5): paste both the "Applicable prior guidance" and "Settled issues — DO NOT re-raise" lists. The subagent treats the latter as additional settled issues.
 - **Automated findings from Step 2.5** (if run): paste them so the subagent doesn't re-surface mechanical issues. The subagent may cross-reference but should not duplicate.
 - **Build the "required upstream reading" list yourself.** The skill calls for 3–6 upstream files; do NOT expect the orchestrator to enumerate them. As the subagent, you derive the list from the diff by: (a) `grep` for imports in each changed file and pull the most-referenced module's interface/shim file; (b) `find` root + directory-level `CLAUDE.md` files for every directory in the changed-file list; (c) extract any PR/issue references from diff comments or commit messages; (d) the PR description's own "related issues" or "see also" links. Cap at 6 files total. Skip auto-generated files (`*.pb.go`, `*_gen.go`, lockfiles, etc.) as candidates.
@@ -318,6 +326,14 @@ Each finding line must include the GitHub permalink built by the lens subagent
 (full SHA, ≥1 line context above/below). Do not strip permalinks; they make
 the report directly clickable on GitHub.
 
+Render each finding using the schema documented in
+`plugins/kmosher-review/skills/SHARED_CONVENTIONS.md` (section 4: Comment body
+schema). Key rules: plain-text severity labels (no emoji); collapse
+`why_it_matters` into a `<details>` block when it adds context beyond the
+description, otherwise omit; for self-contained fixes ≤ 5 lines, append a
+GitHub `suggestion` block at the top level of the finding (NOT inside
+`<details>`).
+
 Final report format:
 
 ```
@@ -332,19 +348,31 @@ Verifier: <n findings audited; n dropped as false-positive/settled/nitpick; n do
 
 ### P0 (X findings)
 - **<source lens>** — <permalink>
-  <what's wrong (1–3 sentences)>
-  *Bug:* <real-scenario impact>
+
+  **P0** — <category>
+
+  <what's wrong (1–3 sentences, concrete)>
+
   *Fix:* <proposed fix>
+
+  <details><summary>Why this matters</summary>
+
+  <real-scenario impact>
+
+  </details>
+
   *Confidence:* <low/medium/high>
 
+  <!-- kmosher-review: severity=P0 confidence=<confidence> lens=<lens> -->
+
 ### P1 (Y findings)
-[same structure]
+[same structure, **P1** label]
 
 ### P2 (Z findings)
-[same structure]
+[same structure, **P2** label]
 
 ### P3 (W findings)
-[same structure]
+[same structure, **P3** label]
 
 ## Prior PR guidance noted (informational)
 <list from Step 1.5 "Applicable prior guidance" that wasn't directly raised as a finding>
@@ -353,6 +381,10 @@ Verifier: <n findings audited; n dropped as false-positive/settled/nitpick; n do
 
 [What to fix first; what to defer; whether to re-run any lens after fixes]
 ```
+
+If `REVIEW.md` (from Step 1) defines its own severity labels (e.g.
+`Important` / `Nit` / `Pre-existing` instead of P0–P3), use those labels in
+the rendered findings — `REVIEW.md` overrides the default tier names.
 
 If no findings survived verification: say so explicitly. The PR is ready to merge from these lenses' perspectives. Mention how many findings the verifier dropped so the user knows the verifier ran and did its job.
 

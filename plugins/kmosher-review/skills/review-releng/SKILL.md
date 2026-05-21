@@ -7,6 +7,15 @@ description: Use when a PR touches production services or anything that could pa
 
 Review through a release-engineering lens: can this be deployed safely, observed in production, and reverted in seconds when it's wrong? Assumes correctness; asks whether it can be operated.
 
+## Shared conventions (read first)
+
+Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
+
+- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults.
+- **Pattern propagation** — when you find an operational gap (missing telemetry, no kill switch, no rollback path) in one new code path, check sibling paths in the diff. The same gap usually repeats.
+- **Findings buffer** — buffer findings to a JSONL file, dedupe and self-verify before emitting.
+- **Comment body schema** — the canonical render shape for findings posted to GitHub.
+
 ## When to Use
 
 **Use for:** any PR touching production services; schema migrations or config changes to load-bearing systems; changes to systems with SLOs/SLAs/compliance; anything that could page someone at 3am; final pre-merge gate after correctness is settled.

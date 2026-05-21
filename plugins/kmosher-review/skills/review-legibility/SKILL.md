@@ -7,6 +7,15 @@ description: Use when reviewing a PR for readability after correctness is settle
 
 Review for **readability**, not correctness. Find code that makes a fresh reader stop and re-read, or that misleads them about intent. Catches cleanup opportunities adversarial reviews miss — branch fanout, restated-in-English comments, comment-to-code-distance bloat, iteration-history scars.
 
+## Shared conventions (read first)
+
+Before applying this lens, read `../SHARED_CONVENTIONS.md` for the four conventions that apply to every `kmosher-review` skill:
+
+- **REVIEW.md overlay** — if the repo has a `REVIEW.md`, its rules override this skill's defaults (especially severity calibration and the nit cap).
+- **Pattern propagation** — when a legibility finding crystallizes, scan all other diff files for the same pattern (the same restated-in-English comment shape, the same branch-fanout shape, the same stale reference). Legibility findings repeat *more* than bug findings, not less.
+- **Findings buffer** — buffer findings to a JSONL file. The 10-finding cap is enforced over the buffer, not as you go.
+- **Comment body schema** — the canonical render shape for findings posted to GitHub.
+
 ## When to Use
 
 **Use for:** final cleanup before merge (especially after heavy iteration); functions/files you keep stumbling over; code landing as a single squashed commit; any "can we make this easier to reason about?" moment.
