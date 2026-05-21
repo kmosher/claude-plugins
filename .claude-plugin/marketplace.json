@@ -15,7 +15,7 @@
         "url": "kmosher/claude-plugins",
         "path": "plugins/kmosher-review"
       },
-      "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, and release-engineering safety. Orchestrated via /review.",
+      "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, release-engineering safety, and agent-skill authoring. Orchestrated via /review.",
       "category": "code-review",
       "tags": ["code-review", "pr-review", "linting", "skills"]
     }

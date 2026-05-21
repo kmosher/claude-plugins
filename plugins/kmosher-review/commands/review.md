@@ -10,6 +10,7 @@ You are routing a code review across the available `kmo` review skills:
 - **`review-legibility`** — readability via 11 concrete heuristic tests (one-sentence purpose, comment deletion, branch fanout, name genericization, reader onramp, reference staleness, iteration-history scars, comment-to-code distance, duplication, tests-as-documentation, self-verification). Always runs after review-code.
 - **`review-compatibility`** — compat across deploy / caller boundaries: data shape (DDL, message formats, stored state) AND interface (exported signatures, public APIs, config keys, env vars, CLI flags, behavior semantics). Optional: use when the change crosses any of those boundaries.
 - **`review-releng`** — operational readiness via revertability/blast-radius/observability/rollout checklist + deployment patterns + anti-patterns. Optional: use for changes touching production services, deploy infra, or anything that could page someone.
+- **`review-agent-skills`** — skill-authoring quality for Claude Code skills, slash commands, and plugin manifests: frontmatter schema, description-as-trigger, body voice, supporting-file references, side-effect safety, rename consistency. Optional: use when the diff touches `**/skills/<name>/`, `**/commands/<name>.md`, `**/agents/<name>.md`, or `.claude-plugin/*.json`.
 
 ## What this command does
 
@@ -131,6 +132,14 @@ under "Prior PR context."
 - Anything that changes runtime behavior of a deployed system
 - Files that touch authentication, authorization, secrets, credential handling
 
+**Agent-skill category** — add `review-agent-skills` if any of:
+- `**/skills/<name>/SKILL.md` added, modified, or deleted
+- `**/skills/<name>/{references,scripts,examples}/**` changes (supporting files for a skill)
+- `**/commands/<name>.md` (slash-command definitions follow the same frontmatter conventions)
+- `**/agents/<name>.md` (agent definitions follow similar conventions)
+- `**/.claude-plugin/plugin.json` or `**/.claude-plugin/marketplace.json`
+- A directory rename under `skills/` — even with no file content changes, the lens checks rename consistency
+
 **If everything is small and trivial** (< 20 lines changed, no new functions, doc/test only) — say so and recommend skipping the review suite.
 
 **Security-touching changes — recommend `/security-review`.** This command's lenses don't have a dedicated security pass; security review is a separate Claude Code skill (`/security-review`, built-in). If the diff touches any of the following, mention `/security-review` in the routing announcement and suggest running it alongside `/review`:
@@ -198,7 +207,8 @@ Run lenses in this order. Earlier lenses can invalidate later findings, so don't
 1. **`review-code`** — always. Bugs make other findings moot.
 2. **`review-compatibility`** — if selected. Compat issues are deploy-blockers.
 3. **`review-releng`** — if selected. Operational concerns assume data layer is settled.
-4. **`review-legibility`** — always, last. Polish after correctness and ops are settled.
+4. **`review-agent-skills`** — if selected. Skill-authoring rules are routing-correctness, not bugs; run after correctness/compat are settled so findings don't get re-classified.
+5. **`review-legibility`** — always, last. Polish after correctness and ops are settled.
 
 Print which lenses you'll run before invoking them, in the form:
 
@@ -207,7 +217,8 @@ Routing this change through:
   1. review-code (always)
   2. review-compatibility (DDL + exported-signature changes detected)
   3. review-releng (touches production service)
-  4. review-legibility (always)
+  4. review-agent-skills (touches plugins/foo/skills/bar/SKILL.md)
+  5. review-legibility (always)
 ```
 
 ### Step 4: Run each selected skill **in a subagent**
@@ -224,7 +235,7 @@ For each lens, in order:
 Call `Agent(subagent_type="general-purpose", description="<lens> review", prompt=...)` with a prompt covering:
 
 - **Goal**: run the `kmosher-review:<lens>` skill on a PR and return structured findings to the orchestrator. The skill itself encodes the technique; your job is to invoke it and follow it literally.
-- **First action**: invoke `Skill(skill="kmosher-review:<lens>")` (e.g. `kmosher-review:review-code`, `kmosher-review:review-legibility`, `kmosher-review:review-compatibility`, `kmosher-review:review-releng`). Follow the skill's instructions exactly; do not re-derive its method.
+- **First action**: invoke `Skill(skill="kmosher-review:<lens>")` (e.g. `kmosher-review:review-code`, `kmosher-review:review-legibility`, `kmosher-review:review-compatibility`, `kmosher-review:review-releng`, `kmosher-review:review-agent-skills`). Follow the skill's instructions exactly; do not re-derive its method.
 - **Repo path**: `<absolute path>`
 - **Owner/repo for citations**: `<owner>/<repo>` (so the subagent can build GitHub permalinks)
 - **Change**: branch `<branch>`, SHA `<sha>` (the full SHA — required for permalinks), base `<base ref>`
