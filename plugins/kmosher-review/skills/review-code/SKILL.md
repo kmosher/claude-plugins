@@ -35,11 +35,15 @@ speculation.
 
 If the diff touches Go files (`.go`, `go.mod`), read `go-guidance.md` in
 this skill's directory before applying the Anti-Pattern Checklist below.
-It covers design-level judgment — abstraction, interface width, error
-wrapping style, table-driven test suggestions, naming — that linters
-don't check and the checklist below doesn't cover. Subordinate to
-`REVIEW.md`/`AGENTS.md`/`CLAUDE.md`. Skip entirely for diffs with no Go
-files — language guidance ships as a bundled reference, not inline here.
+It covers two things the checklist below deliberately excludes: (1)
+design-level judgment — abstraction, interface width, error wrapping
+style, table-driven test suggestions, naming — that linters don't
+check, and (2) bug-shaped anti-patterns whose underlying mechanism only
+exists in Go (type assertions, map iteration order, `defer` semantics),
+kept out of the checklist below so non-Go reviews don't carry
+irrelevant patterns. Subordinate to `REVIEW.md`/`AGENTS.md`/`CLAUDE.md`.
+Skip entirely for diffs with no Go files — language guidance ships as a
+bundled reference, not inline here.
 
 ## Prioritization Hierarchy
 
@@ -138,24 +142,23 @@ If a reviewer disagrees, require new evidence — not a re-raise.
 
 Bug-shaped patterns. Almost always real when found.
 
-- [ ] **Type assertion without `, ok`** — panics on mismatch
 - [ ] **Error returned but ignored** — silent failure
 - [ ] **Pure-accessor that invokes a callback** — runtime side effect masquerading as a getter
 - [ ] **Recursion with no base-case bound** — adversarial input → stack overflow
-- [ ] **Map iteration assumed ordered** — Go iteration is non-deterministic
 - [ ] **Mutation of caller's data** — function modifies a passed-in map/slice; caller's other references see it
-- [ ] **Partial copy with shared inner refs** — `copy(newArr, arr)` shares inner pointers
-- [ ] **`if err != nil { return nil }`** — error swallowed as success-with-no-data
-- [ ] **Goroutine launched with no exit signal** — leaks (Go-specific case of the next pattern)
+- [ ] **Partial copy with shared inner refs** — shallow copy shares inner pointers/references (e.g. Go `copy(newArr, arr)`, JS spread, Python slice)
+- [ ] **Error swallowed as success-with-no-data** — `if err != nil { return nil }` (Go), `catch (e) { return null }` (JS/TS): converts a real failure into an empty-but-successful result
 - [ ] **Async task launched with no cancellation / exit path** — language-agnostic: detached goroutine, unawaited Promise, orphaned `tokio::spawn`, background `Thread` without join
 - [ ] **Shared mutable state accessed without synchronization** — two callers can mutate the same map/struct/array concurrently; missing mutex/atomic/channel; works in tests where only one caller runs
 - [ ] **Lock ordering inconsistency** — function A takes lock X then Y; function B takes Y then X. Deadlock under contention.
 - [ ] **Critical section split by an `await` / `yield` / blocking call** — invariant held inside the critical section is no longer guaranteed across the suspension point
 - [ ] **Channel/queue send with no buffering and no matching receiver** — sender blocks forever; classic in Go (`ch <- x` on unbuffered channel without a goroutine waiting on `<-ch`)
 - [ ] **Ordering assumption across concurrent operations** — code assumes "this `Promise.all` completes in input order" or "this goroutine ran before that one"; not guaranteed
-- [ ] **Defer in a loop without closure barrier** — defers stack to function exit, not iteration
-- [ ] **Predicate using runtime resolver** when structural accessor exists — `Resolve()`/`DefaultValue()` returns nil/error spuriously; use `Has()`/`Default()`/`DefaultFunc()` instead
 - [ ] **Test that mocks the failure mode it's testing** — retry test that mocks the retry; timeout test that mocks the clock without verifying the timeout fires
+
+**Go-specific anti-patterns** (type assertion without `, ok`, map iteration
+ordering, `defer` in a loop, runtime-resolver predicates) moved to
+`go-guidance.md` — load it when the diff touches Go files.
 
 ## Output Format
 

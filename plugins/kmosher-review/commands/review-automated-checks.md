@@ -58,6 +58,9 @@ Always check for these first; the project's own target is the source of truth:
 
 # Cargo projects
 [ -f Cargo.toml ] && grep -A2 '\[workspace\]\|\[package\]' Cargo.toml >/dev/null
+
+# Bazel + nogo (build-time Go lint, common in Pulumi's Bazel-based repos)
+[ -f MODULE.bazel -o -f WORKSPACE ] && [ -f tools/lint/nogo_config.json ]
 ```
 
 If a project target exists, run it first and report its output. The
@@ -69,6 +72,31 @@ configure (e.g. modernize hints, unused-code warnings).
 ## Go
 
 ### Tool stack (run all that apply)
+
+**If the project-target detection found `tools/lint/nogo_config.json` next
+to a `MODULE.bazel`/`WORKSPACE`** (Pulumi's `nogo`-based repos — see
+[nogo docs](https://github.com/bazelbuild/rules_go/blob/main/docs/go/nogo.md)),
+treat that as the authoritative lint for Go files and skip straight to it —
+`go vet`/`staticcheck` run standalone would either duplicate or miss what
+`nogo` enforces (it wraps both plus repo-specific analyzers like a copyright
+header check, an ORM-usage restriction, or a test-kind linter — read
+`tools/lint/AGENTS.md` if present for the current analyzer list):
+
+1. **`bazelisk build //...`** (or a narrower path covering the changed
+   packages) — every registered `nogo` analyzer runs at build time and
+   blocks on violations, so a failing build IS the finding set. Report the
+   exact analyzer name and message from the error output.
+2. **`bazelisk run //:fix -- //<pkg>/...`** is available in some repos for
+   auto-fixable violations (gofmt/goimports-class findings) — don't run it
+   yourself (it mutates files); just note it's available in the report.
+3. Skip steps 2–4 below entirely — `nogo` supersedes them for this repo.
+   Modernize hints are the one thing `nogo` typically doesn't cover; run
+   step 4 anyway (see below) only for that gap, and label those findings as
+   the modernize-only source so the report doesn't imply you re-ran vet or
+   staticcheck redundantly.
+
+**Otherwise** (no `nogo_config.json` — the common case for smaller/non-Bazel
+Go repos):
 
 1. **Project target**: `make lint` if Makefile has it, else skip.
 2. **`go vet`**: `go vet ./...` — built-in correctness analyzers.
@@ -95,6 +123,9 @@ configure (e.g. modernize hints, unused-code warnings).
   walk dependents. Use the modernize CLI to catch hints in untouched files
   the diff might affect (e.g. a renamed helper still referenced elsewhere).
 - `staticcheck` and `go vet` share some checks but not all — run both.
+- `nogo`'s `nogo_config.json` holds per-analyzer file exclusions
+  (generated mocks, vendored code) — do not re-flag something the config
+  deliberately excludes; that's a repo decision, not a gap.
 - For codebases with verbose `go test ./pkg/...` (lots of integration-style
   tests, large packages), run with `-json` and `jq`/`grep` for failures. The Bash tool
   auto-truncates long output to a preview plus a saved file path — grep that
@@ -102,8 +133,8 @@ configure (e.g. modernize hints, unused-code warnings).
 
 ### What to surface in the review report
 
-- **High-confidence** (real bugs): vet errors, staticcheck SA-class findings,
-  build failures.
+- **High-confidence** (real bugs): `nogo`-blocked build failures (`nogo` repos),
+  vet errors, staticcheck SA-class findings, build failures.
 - **Medium-confidence** (style/idiom): modernize hints, staticcheck S-class
   (style) findings — surface as P3 unless the diff touches the affected line.
 - **Low-confidence**: modernize hints in untouched files — note as a footnote;

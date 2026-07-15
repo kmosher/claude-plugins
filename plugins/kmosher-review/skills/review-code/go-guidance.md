@@ -1,9 +1,11 @@
-# Go design-level review guidance
+# Go review guidance
 
-Design-level judgment for Go changes — what linters and the generic
-Anti-Pattern Checklist in `SKILL.md` don't check. Curated from
-[spf13/go-skills](https://github.com/spf13/go-skills), cross-pollinated from
-the equivalent skill in `pulumi/background-agents`'s github-bot.
+Two things for Go changes that don't belong in `SKILL.md`'s
+language-agnostic body: bug-shaped anti-patterns whose underlying
+mechanism only exists in Go, and design-level judgment — what linters
+don't check. Curated from
+[spf13/go-skills](https://github.com/spf13/go-skills), cross-pollinated
+from the equivalent skill in `pulumi/background-agents`'s github-bot.
 
 **Load this file only when the diff touches Go files (`.go`, `go.mod`).**
 Skip it entirely otherwise — keep it out of the main `SKILL.md` body so
@@ -12,17 +14,44 @@ non-Go reviews don't pay for it.
 Repo conventions win: `REVIEW.md`/`AGENTS.md`/`CLAUDE.md` rules take
 precedence, and code following the surrounding codebase's established
 pattern is not a finding. Skip anything the repo's linters or CI would
-catch — that's `review-automated-checks.md`'s job, not this file's.
+catch — that's `review-automated-checks.md`'s job, not this file's (on
+a Bazel/`nogo` repo, most of the anti-patterns below are already
+enforced at build time; check for `tools/lint/nogo_config.json` before
+raising one as a novel finding — it may already be a required check).
 In move/rename-heavy diffs, report a pre-existing defect in moved code
 only when the move promotes it to new API surface, labeled
 `pre-existing`. Version-gated suggestions (`t.Context()` 1.24+,
 `testing/synctest` 1.25+): check `go.mod` first.
 
 Concurrency ownership (every new goroutine needs a stop condition) and
-the other bug-shaped concurrency/error patterns are already covered by
-`SKILL.md`'s Anti-Pattern Checklist at `Important` severity — don't
-re-raise them here. This file is for the softer, Go-idiom-specific
-judgment calls that checklist doesn't cover.
+the other language-agnostic bug-shaped concurrency/error patterns are
+already covered by `SKILL.md`'s Anti-Pattern Checklist at `Important`
+severity — don't re-raise them here.
+
+## Anti-patterns (bug-shaped, Important by default)
+
+Go-specific counterparts to `SKILL.md`'s Anti-Pattern Checklist — moved
+here because the underlying mechanism (two-value type assertion,
+randomized map iteration, `defer` semantics) doesn't exist in other
+languages, so keeping them in the language-agnostic checklist would
+waste attention on non-Go diffs.
+
+- **Type assertion without `, ok`** — `x.(T)` single-value form panics
+  on mismatch; use `v, ok := x.(T)` and handle `!ok`.
+- **Map iteration assumed ordered** — Go randomizes map iteration order
+  per the spec; code that reads `for k, v := range m` and depends on a
+  stable order is non-deterministic. Watch for this feeding into
+  generated output, hashing, or test assertions.
+- **`defer` in a loop without a closure barrier** — defers stack to
+  function exit, not loop iteration; a `defer` inside a `for` loop over
+  N items holds N resources open until the function returns, not until
+  each iteration ends. Wrap the loop body in a named function or an
+  immediately-invoked closure to scope the defer per iteration.
+- **Predicate using a runtime resolver when a structural accessor
+  exists** — `Resolve()`/`DefaultValue()`-style calls (common in
+  Viper-derived config APIs) return `nil`/error spuriously in cases a
+  structural check (`Has()`/`Default()`/`DefaultFunc()`) would handle
+  correctly; prefer the structural accessor when the codebase has one.
 
 ## Abstraction and interfaces
 
