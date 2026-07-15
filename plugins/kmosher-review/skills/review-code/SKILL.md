@@ -31,6 +31,16 @@ cross-reference its findings. When invoked directly, run the relevant
 tooling first so findings ground in concrete diagnostic output rather than
 speculation.
 
+## Language-specific design guidance
+
+If the diff touches Go files (`.go`, `go.mod`), read `go-guidance.md` in
+this skill's directory before applying the Anti-Pattern Checklist below.
+It covers design-level judgment — abstraction, interface width, error
+wrapping style, table-driven test suggestions, naming — that linters
+don't check and the checklist below doesn't cover. Subordinate to
+`REVIEW.md`/`AGENTS.md`/`CLAUDE.md`. Skip entirely for diffs with no Go
+files — language guidance ships as a bundled reference, not inline here.
+
 ## Prioritization Hierarchy
 
 When choosing where to spend attention:
@@ -151,7 +161,7 @@ Bug-shaped patterns. Almost always real when found.
 
 Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.
 
-**`category` values for this lens:** `correctness` (logic error, off-by-one, predicate-at-evaluation-site), `error-handling` (ignored error, swallowed exception, partial cleanup), `concurrency` (lock ordering, channel deadlock, ordering assumption), `memory-or-state` (mutation of caller state, recursion bound, shared-pointer aliasing), `tests` (test that passes with a buggy implementation), `claude-md-violation` (diff violates a CLAUDE.md rule from any applicable file), `adjacent-comment-violation` (diff violates an invariant in adjacent comments).
+**`category` values for this lens:** `correctness` (logic error, off-by-one, predicate-at-evaluation-site), `error-handling` (ignored error, swallowed exception, partial cleanup), `concurrency` (lock ordering, channel deadlock, ordering assumption), `memory-or-state` (mutation of caller state, recursion bound, shared-pointer aliasing), `tests` (test that passes with a buggy implementation), `claude-md-violation` (diff violates a CLAUDE.md rule from any applicable file), `adjacent-comment-violation` (diff violates an invariant in adjacent comments), `go-design` (findings from `go-guidance.md` — abstraction, interface width, naming, idiom).
 
 **Confidence calibration** (what you actually did, not what the finding sounds like):
 - **`low`** — speculated from naming or surface reading.
