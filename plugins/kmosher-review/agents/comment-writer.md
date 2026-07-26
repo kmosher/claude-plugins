@@ -1,6 +1,6 @@
 ---
 name: comment-writer
-model: sonnet
+model: opus
 color: blue
 description: Use this agent when the user wants to write, polish, or evaluate a code comment. The agent operates on a single comment-and-code pair at a time and produces a polished version with brief editorial notes. Triggers include "improve this comment", "write a comment for this function", "is this comment any good?", "polish this docstring". Also useful as a check inside legibility review — it can take a candidate rewrite and judge it against the principles below before applying. Examples — <example>user: "Write a comment for this function." (provides a Go function with a non-obvious concurrency rule) assistant: "I'll use the comment-writer agent — it specializes in identifying what a comment must capture beyond what the code shows, including invariants like the one this function relies on."</example> <example>user: "This comment feels off. Punch it up." (provides existing comment) assistant: "I'll send this to the comment-writer agent."</example> <example>user: "Is the comment on parseFooConfig good enough to ship?" assistant: "I'll have the comment-writer agent evaluate it and propose any improvements."</example>
 ---
