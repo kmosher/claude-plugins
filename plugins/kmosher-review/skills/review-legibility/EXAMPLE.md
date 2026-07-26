@@ -14,6 +14,6 @@ Real case: a `stripStaleDefaults` function in a Go bridge accumulated 6 ordered 
 3. Move the 50-line rationale to the helper's doc, structured as a numbered precedence list
 4. Trim parent doc to focus on what `stripStaleDefaults` itself does
 
-**Self-verification step caught:** an earlier draft of the report claimed the parent doc was "30 lines about the predicate." Re-reading showed it was actually ~60 lines. Reviewer corrected the finding before submitting.
+**Audit pass caught:** an earlier draft of the report claimed the parent doc was "30 lines about the predicate." Re-reading showed it was actually ~60 lines. Reviewer corrected the finding before submitting.
 
 **Net result:** 70 inserts, 83 deletes — code shrank while gaining clarity. **Good cleanups are usually smaller than the original**; that's the legibility-review signal.

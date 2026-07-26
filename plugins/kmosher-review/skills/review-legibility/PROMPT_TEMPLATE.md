@@ -123,18 +123,17 @@ leads with meta-narration ("Two assertion styles are used") and a setup clause. 
 
 Worked example — when to leave alone: a 17-line test rationale comment lists two reasons a stored value is preserved (RawConfig falsy semantics from PR #3420; changed-default phantom-diff). Tests 1–3 might suggest compressing to 4 lines naming the two invariants without the mechanism. The load-bearing test (step 4) reveals: someone considering changing this rule needs the *mechanism* to evaluate the change, not just the existence-claim. Bake-off (step 5) confirms the longer version wins. The original earned its length; do not propose a rewrite.
 
-### Test 12: Self-verification (before submitting)
-For each finding you're about to submit: re-open the file, re-read the cited code, and confirm the finding accurately characterizes what's there. If you cannot verify the claim by reading the actual code, drop the finding. State which findings you verified.
-
 ## Output format
 
-Numbered findings, **max 10**. Each:
+Numbered findings, no cap. Each:
 - **Severity**: P1 (will actively mislead readers), P2 (high friction), P3 (preference, defensible either way)
 - **File:line ref**
 - **Which test flagged it**
 - **What's wrong** (concrete — "this comment restates `if x { ... }` in English" not "this comment is unclear")
 - **Proposed cleanup** (sketch the structure, not just "rewrite for clarity")
 
-Cap findings at 10 to force prioritization. If fewer than 10 issues clear the bar, say so explicitly.
+Report every issue that clears the bar below — the filter is on kind, not
+count. If nothing clears it, say so explicitly rather than reaching for
+something to fill the list.
 
 DO NOT propose pure stylistic preferences (tab vs spaces, brace style, import order). Only structural or semantic legibility issues.

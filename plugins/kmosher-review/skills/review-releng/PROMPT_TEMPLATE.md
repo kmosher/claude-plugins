@@ -47,9 +47,6 @@ For each section, list every failure with file:line or PR-level concern.
 - [ ] Multi-service: deploy ordering documented?
 - [ ] Explicit rollback procedure, confirmed working?
 
-### Self-verification (before submitting)
-For each finding, re-read the cited code/config and confirm the claim. State which findings you verified by inspecting the actual artifact (deploy config, observability code, etc.) and which are inferred from naming or structure.
-
 ## Output format
 
 Numbered findings. Each:

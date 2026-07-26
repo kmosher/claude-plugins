@@ -9,7 +9,7 @@ Review for **readability**, not correctness. Find code that makes a fresh reader
 
 ## Shared conventions (read first)
 
-Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md overlay, pattern propagation, and the findings buffer. The 10-finding cap below is enforced over the buffer, not as you go.
+Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md overlay, pattern propagation, the findings buffer, and the report-everything rule.
 
 ## When to Use
 
@@ -37,14 +37,16 @@ distance, restated-in-English comments).
 
 ## Prioritization Hierarchy
 
-Legibility findings can balloon. The 10-finding budget is enforced by this order:
+Legibility findings can balloon. This order governs where attention goes first — and so, on a big diff, what gets found at all:
 
 1. **Misleading code** — comment claims X, code does Y; function name promises one behavior, body does another; stale references resolving wrong
 2. **High-friction structure** — branch fanout, oversized functions, comment-to-code-distance bloat
 3. **Unfocused naming or docs** — names not carrying weight, docs describing the predicate not the function's purpose
 4. **Defensible preference** — alternate phrasing, optional extraction
 
-Higher beats lower. Level-4 issues should never crowd out level-1.
+Higher beats lower. Level-4 issues should never crowd out level-1 — but once a
+level-1 issue is found, a level-4 one alongside it still gets reported; the
+hierarchy orders the search, not the output.
 
 ## Why It's a Different Problem
 
@@ -69,7 +71,6 @@ Each is a *test* the reviewer applies and flags failures. Concrete enough that t
 | 9 | Duplication | Pattern repeated 3+ times **OR** a new decision (predicate, switch, lookup table, transformation, validator) whose logic is also encoded elsewhere | Inventory each decision (function + inputs + outputs), grep adjacent code for matches on inputs OR outputs, compare side-by-side. Extract a helper, consolidate to one source of truth, or add a drift-catching test as appropriate to the shape. |
 | 10 | Tests as documentation | Read only test name + top-level asserts; does the contract emerge? | If you must read the body, the test isn't documenting behavior |
 | 11 | Comment density and lead | For each multi-sentence comment: lead test, mechanism-restatement check, hedge-and-passive sweep, load-bearing test. **Hand non-trivial rewrites to the `comment-writer` agent** — don't draft them yourself. Bake-off when uncertain. | Bidirectional failure mode: too verbose buries the take-home; too terse cuts load-bearing context. Default to leaving alone when the load-bearing test passes; delegate rewrites to the agent. |
-| 12 | Self-verification | Before submitting, re-open each cited line and confirm the finding | Drop findings you can't verify; state which you did |
 
 ## Severity Calibration
 
@@ -77,23 +78,36 @@ Each is a *test* the reviewer applies and flags failures. Concrete enough that t
 - **P2** — high friction (6-branch chain unextracted, 30-line function with 5 responsibilities, magic constant unnamed). Should be addressed.
 - **P3** — defensible either way. Author's choice.
 
-## The 10-Finding Cap
+## What Keeps This Lens Honest
 
-Legibility critique balloons easily. Cap at 10. Forces prioritization: which 10 things are worst? Pair with explicit "DO NOT propose pure stylistic preferences." Filters preference from real friction.
+Legibility critique balloons more easily than any other lens, because every line
+of code admits *some* preference-shaped complaint. The discipline that keeps it
+useful is a bar on **kind**, not a cap on **count**:
 
-If fewer than 10 issues clear the bar, the reviewer should say so. Performative thoroughness is worse than honest "this is fine."
+> DO NOT propose pure stylistic preferences. Only structural or semantic
+> legibility issues — something a next reader will actually trip on.
+
+That bar is what separates preference from friction, and it does the job a
+finding cap used to do here. A cap did it badly: it made the lens discard real
+friction once the list got long, and it applied the squeeze before any of the
+context needed to prioritize well — the other lenses' findings, the repo's
+`REVIEW.md` thresholds — was available. Report every issue that clears the
+kind-bar; the coordinator trims for presentation (`SHARED_CONVENTIONS.md` §4).
+
+Honest "this is fine" remains a correct outcome. Performative thoroughness is
+still worse than nothing.
 
 ## Output Format
 
 Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.
 
-**Lens-specific field:** add `heuristic` (int 1–12) — which row of The Heuristics table the finding came from. Lets the coordinator and the reader trace each finding back to the test it failed.
+**Lens-specific field:** add `heuristic` (int 1–11) — which row of The Heuristics table the finding came from. Lets the coordinator and the reader trace each finding back to the test it failed.
 
 **`category` values for this lens:** `misleading` (comment claims X but code does Y; name promises wrong behavior; stale reference), `structure` (branch fanout, comment-to-code distance, function-too-big), `naming-or-docs` (generic name, doc describes predicate not purpose, untyped onramp), `duplication` (pattern repeated 3+ times, decision-logic encoded in two places), `comment-density` (lead test, mechanism restatement, hedge-and-passive), `tests-as-docs` (test name + asserts don't reveal contract).
 
-**Severity** comes from "Severity Calibration" above (`P1` actively misleads / `P2` high friction / `P3` defensible). **Confidence** follows the same low/medium/high rubric as `review-code`: distinguished by what you actually did to verify (heuristic 12 — self-verification — is mandatory before emitting).
+**Severity** comes from "Severity Calibration" above (`P1` actively misleads / `P2` high friction / `P3` defensible). **Confidence** follows the same low/medium/high rubric as `review-code`: distinguished by what you actually did to establish the claim.
 
-Cap is enforced over the buffer: dedupe and self-verify first, then keep the top 10 by severity. If fewer than 10 clear the bar, return what you have plus a meta note saying so.
+Dedupe, sort by severity, return everything that cleared the kind-bar. If the diff is clean, return an empty block plus a meta note saying so.
 
 | Misconception | Reality |
 |---|---|
@@ -132,11 +146,10 @@ See `EXAMPLE.md` in this skill's directory — a 6-branch predicate with 50 line
 |---|---|
 | Asking "is this clear?" | Force specific tests; "clear" is subjective |
 | Allowing stylistic preferences | Explicitly disallow tab/brace/import-order findings |
-| No finding cap | Cap at 10; preference noise drowns real friction |
+| Capping the finding count | Bar the *kind* (no stylistic preferences), not the count; a cap drops real friction once the list runs long |
 | Mixing in correctness review | Two separate prompts. Legibility assumes correctness. |
-| No "fewer than 10 is fine" escape hatch | Reviewer manufactures findings to fill the count |
+| No "nothing surfaced is fine" escape hatch | Reviewer manufactures findings rather than report a clean diff |
 | Not pre-loading package style | Reviewer flags "non-idiomatic" stuff that's idiomatic for the surrounding code |
-| No self-verification step | Reviewer ships findings citing wrong line numbers or misquoted code |
 
 ## Pairing With Other Skills
 

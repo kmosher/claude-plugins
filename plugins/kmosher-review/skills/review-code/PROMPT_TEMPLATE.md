@@ -60,13 +60,6 @@ production code actually produces.
 ### 6. Negative-space audit
 List what's absent that production code should have. Concrete only.
 
-### 7. Self-verification (before submitting)
-For each finding you're about to submit: re-open the file, re-read the code,
-and confirm the claim is true as written. If you cannot verify the claim by
-reading the actual code (not its name, not its surrounding doc), mark the
-finding's confidence as low or drop it. State explicitly which findings you
-verified and which you didn't.
-
 ## Output format
 
 Numbered findings. Each:
@@ -80,5 +73,8 @@ Numbered findings. Each:
   didn't fully verify the failure path) / high (read the implementation and
   traced an end-to-end scenario demonstrating the bug)
 
-Aim for 6–15 findings. **If there are genuinely no novel issues, say so
-explicitly** with reasoning. Do not manufacture findings to fill the count.
+Report every finding you believe is real — no cap, no severity floor. Set
+confidence honestly rather than dropping what you couldn't fully establish;
+an independent pass downstream does the filtering. **If there are genuinely
+no novel issues, say so explicitly** with reasoning. Do not manufacture
+findings.

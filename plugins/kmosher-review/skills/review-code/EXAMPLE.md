@@ -15,6 +15,6 @@ Real case: a PR adding `stripStaleDefaults` to a Go bridge between Pulumi and Te
 
 **Negative-space finding:** function had no logging, used `log.Printf` directly instead of the package's `pulumilog.V(N).Infof` convention. P3, easy fix, surfaced through the negative-space step that explicitly looks at "what's absent that the surrounding code uses?"
 
-**Self-verification step caught:** an earlier draft of the report claimed `stripMapOfBlocks` handled a nested-block shape "incorrectly." Re-reading the function showed the shape mismatch was real but the function early-returned safely on it (the `inner.IsObject()` guard). The reviewer downgraded the finding from P1 to P3 (dead code, not a bug).
+**Audit pass caught:** an earlier draft of the report claimed `stripMapOfBlocks` handled a nested-block shape "incorrectly." Re-reading the function showed the shape mismatch was real but the function early-returned safely on it (the `inner.IsObject()` guard). The reviewer downgraded the finding from P1 to P3 (dead code, not a bug).
 
 **Net result:** 6 findings. 2 fixed (P1 predicate, P3 logging). 1 became a follow-up issue. 3 confirmed-but-deferred with documented reasoning.

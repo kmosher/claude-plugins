@@ -54,7 +54,10 @@ When choosing where to spend attention:
 3. **Test weaknesses that hide bugs** — tests that pass with a buggy implementation
 4. **Comment/doc inaccuracies that mislead future readers**
 
-Higher beats lower. The 6–15 finding cap forces this prioritization.
+Higher beats lower — this orders where you spend *attention*, not what survives
+into the buffer. Everything real gets reported (`SHARED_CONVENTIONS.md` §4);
+the hierarchy decides what you go looking for first, and therefore what you
+find at all when the diff is too big to exhaust.
 
 ## Why Normal Reviews Miss Real Bugs
 
@@ -66,7 +69,7 @@ Five recurring failure modes:
 4. **Speculate from naming.** A function named `stripMapOfBlocks` *sounds* right; whether the shape exists in production needs reading shim docs the code references but the reviewer skips.
 5. **Re-raise settled issues.** Without an "already-adjudicated" list, each reviewer wastes budget rediscovering decisions.
 
-## The Eight Techniques + Self-Verification
+## The Eight Techniques
 
 Force the review through these explicitly. Output must show reasoning for each.
 
@@ -107,12 +110,6 @@ Trace two specific real-world cases end-to-end through every function in the cha
 ### 8. Negative-space audit
 
 What's absent that production code should have? Concrete absences only. Logging/telemetry, kill switch, edge-case handling documented but not enforced.
-
-### 9. Self-verification (before submitting)
-
-For each finding you're about to submit: re-open the file, re-read the code, confirm the claim is true. If you cannot verify by reading the actual code (not its name, not surrounding doc), mark confidence as low or drop the finding. State which findings you verified and which you didn't.
-
-This is the step Meta's research treats as load-bearing: "verify your conclusions against the evidence you traced." Catches fabricated findings before they ship.
 
 ## Settled-Issues List
 
@@ -171,7 +168,7 @@ Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md
 - **`medium`** — read related code but didn't fully trace the failure path.
 - **`high`** — read the implementation and traced an end-to-end scenario demonstrating the bug.
 
-Aim for 6–15 findings. **If genuinely no novel issues**, return an empty JSONL block with a meta note explaining what you checked and why nothing surfaced. Do not manufacture.
+No finding cap — see `SHARED_CONVENTIONS.md` §4. **If genuinely no novel issues**, return an empty JSONL block with a meta note explaining what you checked and why nothing surfaced. Do not manufacture.
 
 ## Worked Example
 
@@ -188,7 +185,7 @@ See `EXAMPLE.md` in this skill's directory for a real case (PR with ~10 prior re
 | Not requiring upstream reading | Reviewer greps, doesn't read, misses semantic facts |
 | Vague "trace through" | Specify cases by name (real provider, product, version) |
 | Letting tests speak for themselves | Force the "buggy implementation that passes" exercise per test |
-| No self-verification step | Reviewer ships fabricated findings; severity inflated |
+| Finding cap or severity floor in the lens prompt | Report everything real; filter in the coordinator's audit pass, which sees all lenses at once |
 
 ## Pairing With Other Skills
 

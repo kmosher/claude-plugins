@@ -52,9 +52,6 @@ Change category: [DDL / message format / stored state / API contract / cross-sys
 - Irreversible migration: dry-run mode?
 - Metric/alert for unexpected post-migration data shape?
 
-### Self-verification (before submitting)
-For each finding, re-read the migration SQL, the code that writes data, and the code that reads data. Confirm the cited risk is real. State which findings you verified by inspecting actual SQL/code versus inferred from structure.
-
 ## Output format
 
 Numbered findings. Each:

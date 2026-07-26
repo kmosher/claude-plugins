@@ -6,8 +6,8 @@ disable-model-invocation: false
 
 You are routing a code review across the available `kmo` review skills:
 
-- **`review-code`** — bug-finding via per-call trace, adversarial test critique, failure-mode enumeration, concrete walkthroughs, schema/shape semantics, negative-space audit, self-verification. Always runs.
-- **`review-legibility`** — readability via 11 concrete heuristic tests (one-sentence purpose, comment deletion, branch fanout, name genericization, reader onramp, reference staleness, iteration-history scars, comment-to-code distance, duplication, tests-as-documentation, self-verification). Always runs after review-code.
+- **`review-code`** — bug-finding via per-call trace, adversarial test critique, failure-mode enumeration, concrete walkthroughs, schema/shape semantics, negative-space audit. Always runs.
+- **`review-legibility`** — readability via 11 concrete heuristic tests (one-sentence purpose, comment deletion, branch fanout, name genericization, reader onramp, reference staleness, iteration-history scars, comment-to-code distance, duplication, tests-as-documentation, comment density). Always runs after review-code.
 - **`review-compatibility`** — compat across deploy / caller boundaries: data shape (DDL, message formats, stored state) AND interface (exported signatures, public APIs, config keys, env vars, CLI flags, behavior semantics). Optional: use when the change crosses any of those boundaries.
 - **`review-releng`** — operational readiness via revertability/blast-radius/observability/rollout checklist + deployment patterns + anti-patterns. Optional: use for changes touching production services, deploy infra, or anything that could page someone.
 - **`review-agent-skills`** — skill-authoring quality for Claude Code skills, slash commands, and plugin manifests: frontmatter schema, description-as-trigger, body voice, supporting-file references, side-effect safety, rename consistency. Optional: use when the diff touches `**/skills/<name>/`, `**/commands/<name>.md`, `**/agents/<name>.md`, or `.claude-plugin/*.json`.
@@ -16,25 +16,25 @@ You are routing a code review across the available `kmo` review skills:
 
 Given a PR or branch (default: the current branch), this command:
 
-0. **Eligibility check** — cheap Haiku gate that skips closed/draft/trivial/already-reviewed PRs before spending any Sonnet budget.
+0. **Eligibility check** — cheap Sonnet gate that skips closed/draft/trivial/already-reviewed PRs before spending any Opus budget.
 1. **Identifies the change** — gather the diff, the files touched, and the PR description (if any).
 1.5. **Prior-PR-comment mining** — surface adjudicated concerns and prior reviewer guidance from past PRs that touched these files (parallel subagent).
 2. **Classifies the change** to decide which review lenses apply.
 3. **Runs automated lint/diagnostic tooling** appropriate to the languages in the diff (Go, TypeScript, Rust, …) — see Step 2.5 and the sibling file `review-automated-checks.md`.
 4. **Runs the relevant skills in the right order**, each in an isolated subagent that invokes the lens skill in its own context.
-4.5. **Verifier pass** — a Haiku subagent re-checks each finding against the actual code, downgrades false positives, and flags pre-existing patterns.
-5. **Aggregates findings** across automated tools, skill lenses, and the verifier; deduplicates; produces a single prioritized report with GitHub permalink citations.
+4.5. **Auditor pass** — an Opus subagent re-checks each finding against the actual code, separating claims that don't hold from claims that do, and recalibrating severity.
+5. **Aggregates findings** across automated tools, skill lenses, and the auditor; deduplicates; produces a single prioritized report with GitHub permalink citations.
 6. **Offers to post the report as a PR comment** (skipped if `$ARGUMENTS` includes `local`, no PR exists, or no findings survived).
 
 ## Step-by-step
 
 ### Step 0: Eligibility gate
 
-Before spending Sonnet budget, dispatch a cheap Haiku subagent to check whether
-this PR is even worth reviewing. Skipping closed/draft/trivial PRs early is the
-cheapest defense against wasted dispatches.
+Before spending Opus budget, dispatch a Sonnet subagent to check whether this PR
+is even worth reviewing. Skipping closed/draft/trivial PRs early is the cheapest
+defense against wasted dispatches.
 
-Dispatch via `Agent(subagent_type="general-purpose", description="PR eligibility check", model="haiku", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="general-purpose", description="PR eligibility check", model="sonnet", prompt=...)` with a prompt covering:
 
 - **Goal**: determine whether `/review` should proceed on this PR. Return a structured verdict; the orchestrator decides what to do next.
 - **PR identifier**: `$ARGUMENTS` if it contains a PR number/URL; otherwise the current branch with `gh pr view --json title,body,number,state,isDraft,reviewDecision,comments,reviews`.
@@ -89,7 +89,7 @@ PR threads.
 Dispatch in parallel with Step 2 (classification). The orchestrator does not
 read raw PR comments; the subagent distills.
 
-Dispatch via `Agent(subagent_type="general-purpose", description="Prior PR comment mining", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="general-purpose", description="Prior PR comment mining", model="sonnet", prompt=...)` with a prompt covering:
 
 - **Goal**: surface adjudicated concerns and reviewer guidance from past PRs touching the files in this change. Output is passed to each lens subagent so they don't re-raise settled issues.
 - **Repo**: `<owner>/<repo>`
@@ -176,7 +176,7 @@ If the diff is purely documentation, generated, or otherwise lint-irrelevant
 (only `.md`, `.golden`, `.json` fixture changes), skip this step entirely
 and say so explicitly in the routing announcement. Otherwise:
 
-Dispatch via `Agent(subagent_type="general-purpose", description="Automated lint/diagnostic sweep", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="general-purpose", description="Automated lint/diagnostic sweep", model="sonnet", prompt=...)` with a prompt covering:
 
 - **Goal**: run mechanical lint/diagnostic checks on a PR, return structured findings only. The orchestrator will fold them into the final report alongside human-judgment findings.
 - **Repo path**: `<absolute path>`
@@ -199,6 +199,23 @@ Dispatch via `Agent(subagent_type="general-purpose", description="Automated lint
   <one line each: tool name, reason — e.g. "no Go files", "make lint target not present">
   ```
 - **Do not** dump raw lint output. Summarize. If a single tool produced >50 findings, group them and report counts per category rather than listing each.
+
+### Model policy
+
+**Every judgment step runs on Opus.** That means all five lenses (Step 4) and
+the auditor (Step 4.5) — the steps whose output is a claim about whether code is
+wrong. Reviewing is the task this suite exists to do well, and it is precisely
+the task where a cheaper model's misses are invisible: a lens that fails to
+notice a bug returns the same clean-looking JSONL as a lens that correctly found
+nothing.
+
+Sonnet is the floor, used only for the steps that gather rather than judge:
+the eligibility gate (Step 0), prior-PR mining (Step 1.5), and the lint sweep
+(Step 2.5). Each of those transcribes or summarizes something already
+determined elsewhere — a PR's state, a comment thread's conclusion, a linter's
+exit code — so a weaker model's failures show up as obviously missing data
+rather than as false confidence. Do not push a lens or the auditor down to
+Sonnet to save budget; drop a lens from the run instead, and say which one.
 
 ### Step 3: Sequencing
 
@@ -232,7 +249,7 @@ exists to avoid.
 
 For each lens, in order:
 
-Call `Agent(subagent_type="general-purpose", description="<lens> review", prompt=...)` with a prompt covering:
+Call `Agent(subagent_type="general-purpose", description="<lens> review", model="opus", prompt=...)` with a prompt covering:
 
 - **Goal**: run the `kmosher-review:<lens>` skill on a PR and return structured findings to the orchestrator. The skill itself encodes the technique; your job is to invoke it and follow it literally.
 - **First action**: invoke `Skill(skill="kmosher-review:<lens>")` (e.g. `kmosher-review:review-code`, `kmosher-review:review-legibility`, `kmosher-review:review-compatibility`, `kmosher-review:review-releng`, `kmosher-review:review-agent-skills`). Follow the skill's instructions exactly; do not re-derive its method.
@@ -269,7 +286,7 @@ Call `Agent(subagent_type="general-purpose", description="<lens> review", prompt
   <one paragraph, free-form. Note anything the orchestrator should know: "diff is mostly generated code, applied skill only to handwritten files"; "REVIEW.md declared 3 codebase precedents; flagged none of them"; "no novel findings, what I checked was X/Y/Z".>
   ````
 
-  The `findings` JSONL block follows the canonical finding schema from `SHARED_CONVENTIONS.md` §3 plus any lens-specific fields documented in the lens's Output Format section. If no findings survived self-verification, emit an empty `jsonl` code block and explain in `meta`.
+  The `findings` JSONL block follows the canonical finding schema from `SHARED_CONVENTIONS.md` §3 plus any lens-specific fields documented in the lens's Output Format section. Report every finding you believe is real, at whatever severity — the auditor in Step 4.5 does the filtering, and it sees all lenses at once. If genuinely nothing surfaced, emit an empty `jsonl` code block and explain in `meta`.
 
 - **Do not** return a transcript, file dumps, narration, or any markdown rendering of findings. The orchestrator renders. The subagent emits raw structured data.
 
@@ -279,29 +296,34 @@ After each subagent returns:
 - If only P1/P2/P3 emerged, continue to the next lens. The user can address them in batch.
 - The orchestrator's context now contains only the structured findings text (a few KB per lens), not the file reads or the skill body — that's the whole point of this step.
 
-### Step 4.5: Verifier pass (cheap Haiku audit)
+### Step 4.5: Auditor pass
 
-The lens subagents are smart and motivated to find issues — they have a known
-false-positive bias. Before aggregating to the user, run a separate Haiku
-subagent that re-checks each finding against the actual code. This catches:
+The lenses report everything they believe is real and do no filtering of their
+own (`SHARED_CONVENTIONS.md` §4). This is the pass that establishes which of
+those claims hold. It exists as a separate step, on a separate agent, precisely
+because a reviewer auditing its own findings grades its own work — this agent
+never saw the finding get written and has no stake in it surviving.
 
-- Findings that don't survive a re-read of the cited code (hallucinations).
-- Findings flagging behavior that's pre-existing or intentional elsewhere in the codebase (the pattern is by-design, not a bug).
-- Findings whose severity was inflated; should be downgraded.
+It sorts findings into three outcomes:
 
-This pass is cheap (Haiku, structured output) and catches what a single
-self-review-step in the lens can't.
+- **Doesn't hold** — the cited code doesn't say what the finding claims. This is the only outcome that removes a finding from the report.
+- **Holds, but already decided** — real, but pre-existing, by-design elsewhere in the codebase, or explicitly adjudicated in the settled-issues list. Still reported, in its own section, because "we already decided this" is information the reader may want to revisit.
+- **Holds** — reported, at whatever severity the rubric lands on.
+
+**The auditor's job is truth, not volume.** It has no quota to cut and no target
+list length. A pass where every finding holds is a correct result. Do not treat
+a low drop count as evidence the auditor was lax.
 
 Skip Step 4.5 if zero findings emerged across all lenses.
 
-Dispatch via `Agent(subagent_type="general-purpose", description="Findings verifier", model="haiku", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="general-purpose", description="Findings auditor", model="opus", prompt=...)` with a prompt covering:
 
 - **Goal**: audit each finding against the actual code; produce a verdict per finding. Output is folded into the final report.
 - **Repo path**: `<absolute path>`
 - **Owner/repo, full SHA**: pass through from Step 1.
 - **Findings to verify**: the concatenated JSONL `findings` blocks from every lens in Step 4. Assign each finding a stable global index (`<lens>:<n>`, e.g. `code:0`, `legibility:3`).
-- **Settled issues + prior guidance**: pass through from Step 1.5. The verifier uses these to mark findings that re-raise adjudicated concerns.
-- **For each finding, the verifier does**:
+- **Settled issues + prior guidance**: pass through from Step 1.5. The auditor uses these to mark findings that re-raise adjudicated concerns.
+- **For each finding, the auditor does**:
   1. `Read` the file + cited `line` (with a few lines of context). Confirm the cited code matches the `description`.
   2. If the finding cites behavior elsewhere in the codebase, `Grep` for the same pattern. If the pattern is widespread and consistent, flag the finding as "pattern is by-design, not a regression."
   3. Check whether the cited lines are actually changed in this PR or pre-existing (`git blame` the file at the SHA; if the commit isn't in the PR's commit range, it's pre-existing).
@@ -312,7 +334,16 @@ Dispatch via `Agent(subagent_type="general-purpose", description="Findings verif
   - **P1** — logic error that WILL trigger under realistic production conditions; resource leak; real concurrency bug; revertability gap that becomes unfixable post-merge.
   - **P2** — edge case that COULD trigger; missing error handling; compatibility risk in a non-hot path; observability gap.
   - **P3** — code quality, minor concern, test-strength issue, legibility friction.
-  - **nitpick / false positive** — pre-existing, by-design, or doesn't survive re-reading. Mark and drop from the user-facing report.
+
+  There is no severity below P3 that means "not worth mentioning." A real
+  finding you'd score beneath P3 is a P3.
+
+- **Verdicts** — assign exactly one per finding:
+  - `false-positive` — the cited code does not support the claim. **The only verdict that removes a finding from the report.** Use it when the finding is wrong, never when it is merely small.
+  - `settled` — the claim holds, but the settled-issues list adjudicated it. Reported in its own section, not dropped.
+  - `pre-existing` — the claim holds, but the cited lines predate this PR, or the pattern is consistent and by-design across the codebase. Reported in its own section, not dropped.
+  - `downgraded` / `upgraded` — the claim holds at a different severity than the lens assigned. Include `from` and `to`. Severity moves in both directions; if a lens under-called something, raise it.
+  - `kept` — the claim holds at the severity the lens assigned.
 - **Output format** (only this, no transcript):
 
   ````
@@ -321,31 +352,40 @@ Dispatch via `Agent(subagent_type="general-purpose", description="Findings verif
   ```jsonl
   {"index": "code:0", "verdict": "kept", "reason": "..."}
   {"index": "code:1", "verdict": "downgraded", "from": "P1", "to": "P2", "reason": "..."}
+  {"index": "code:4", "verdict": "upgraded", "from": "P2", "to": "P1", "reason": "..."}
   {"index": "legibility:3", "verdict": "settled", "reason": "matches Settled-Issues #2"}
+  {"index": "releng:1", "verdict": "pre-existing", "reason": "lines last touched in a4f21c9, outside this PR"}
   {"index": "compatibility:0", "verdict": "false-positive", "reason": "re-read code, claim does not hold"}
   ```
 
-  `verdict` is one of `kept`, `downgraded`, `settled`, `nitpick`, `false-positive`. Include `from` and `to` only for `downgraded`.
+  Include `from` and `to` only for `downgraded` / `upgraded`.
 
   ## adjusted_counts
 
   ```json
-  {"P0": <n>, "P1": <n>, "P2": <n>, "P3": <n>, "dropped": <n>}
+  {"P0": <n>, "P1": <n>, "P2": <n>, "P3": <n>, "settled": <n>, "pre_existing": <n>, "false_positive": <n>}
   ```
   ````
 
-The orchestrator applies the verdicts in Step 5: drop findings tagged `settled`, `nitpick`, or `false-positive`; relabel severities for downgrades; preserve `kept` findings as-is.
+The orchestrator applies the verdicts in Step 5: drop only `false-positive`; relabel severities for `downgraded` / `upgraded`; render `settled` and `pre-existing` in their own section; preserve `kept` as-is.
 
 ### Step 5: Aggregate and render
 
-The orchestrator now holds structured JSONL `findings` blocks from each lens (Step 4) and `verdicts` from the verifier (Step 4.5). Aggregation is mechanical:
+The orchestrator now holds structured JSONL `findings` blocks from each lens (Step 4) and `verdicts` from the auditor (Step 4.5). Aggregation is mechanical:
 
-- **Apply verifier verdicts first.** Drop findings whose verdict is `settled`, `nitpick`, or `false-positive`. For `downgraded` findings, set `severity` to the verdict's `to` field. Keep `kept` findings as-is.
+- **Apply auditor verdicts first.** Drop *only* findings whose verdict is `false-positive`. Set `severity` from the `to` field for `downgraded` / `upgraded`. Route `settled` and `pre-existing` to their own section (they are real; they're just already-decided). Keep `kept` as-is.
 - **Deduplicate by `(file, line, category)`.** When two lenses flag the same cell (e.g. `review-code` flags the bug, `review-legibility` flags the unclear branching), merge into one entry: keep the higher-severity framing, concatenate the `description`s, and record both lenses in a `lenses` array on the merged finding.
 - **Sort** by severity (`P0` first), then by lens (run order), then by `file:line`.
 - **Render** each surviving finding using the Finding render schema below. This is the first time markdown enters the pipeline.
-- **Summarize** at the top: counts by severity, lenses run/skipped, verifier drop/downgrade counts.
+- **Summarize** at the top: counts by severity, lenses run/skipped, auditor false-positive/severity-change counts.
 - **Recommend next step**: fix `P0`/`P1` findings, re-run the relevant lens(es), then merge.
+
+**Do not trim the report to a comfortable length.** Severity sections are how a
+long report stays readable — a reader who only wants blockers reads the P0/P1
+sections and stops. Cutting real P2s and P3s to make the report look shorter
+throws away the findings most likely to be cheap to fix, and the reader has no
+way to know they existed. If the count is genuinely large, say so in the summary
+line and let the sections do their job.
 
 Every finding has a `permalink` field built by the lens subagent (full SHA, ≥1 line context above/below). Use it as the clickable header for each rendered finding.
 
@@ -371,7 +411,7 @@ Final report format:
 Lenses run: <list>
 Lenses skipped: <list, with one-line reason each>
 Automated tools run: <list>
-Verifier: <n findings audited; n dropped as false-positive/settled/nitpick; n downgraded>
+Auditor: <n findings audited; n dropped as false-positive; n severity changes; n settled/pre-existing>
 
 ## Findings by severity
 
@@ -403,6 +443,13 @@ Verifier: <n findings audited; n dropped as false-positive/settled/nitpick; n do
 ### P3 (W findings)
 [same structure, **P3** label]
 
+## Settled / pre-existing (V findings)
+
+Findings that hold up but were already decided, or predate this PR. Listed so
+the decision is visible and can be revisited, not because they block anything.
+
+<same structure, with the auditor's `reason` as the lead line>
+
 ## Prior PR guidance noted (informational)
 <list from Step 1.5 "Applicable prior guidance" that wasn't directly raised as a finding>
 
@@ -411,14 +458,14 @@ Verifier: <n findings audited; n dropped as false-positive/settled/nitpick; n do
 [What to fix first; what to defer; whether to re-run any lens after fixes]
 ```
 
-If no findings survived verification: say so explicitly. The PR is ready to merge from these lenses' perspectives. Mention how many findings the verifier dropped so the user knows the verifier ran and did its job.
+If no findings survived the audit: say so explicitly. The PR is ready to merge from these lenses' perspectives. Mention how many findings the auditor dropped as false positives so the user knows it ran and did its job.
 
 ### Step 6: Offer to post the report to the PR
 
 After printing the report, decide whether to offer posting it as a PR comment:
 
 - **Skip the offer entirely** if any of: `$ARGUMENTS` contains `local` / `no post` / `don't post`; no PR exists for the branch (Step 1's `gh
-  pr view` returned no PR); zero findings survived verification (nothing useful
+  pr view` returned no PR); zero findings survived the audit (nothing useful
   to post).
 - **Otherwise, ask the user** with a single concise prompt: `Post this review as
   a comment on PR #<num>? (yes / no )`. Unless the user has already indicated
@@ -435,6 +482,8 @@ Do not auto-post without clear intent or confirmation. Posting to a PR is visibl
 
 - **Stay in routing mode, not reviewing mode.** Your job is to dispatch subagents and aggregate their output. You should never read the files being reviewed yourself; never run lint inline; never load the review-* skills via `Skill` in this conversation. The subagents do all of that in their own context.
 - **Never manufacture findings.** If a subagent reports no novel issues, faithfully relay that. Padding the report wastes the user's attention.
+- **Never drop a finding that holds.** The auditor's `false-positive` verdict is the only thing that removes one. You are not a second filter — you have read none of the code, so a finding that looks minor from the orchestrator's seat is one you are the least qualified reader to cut.
+- **Spawn only the subagents these steps name.** One per lens, plus the eligibility gate, the miner, the lint sweep, and the auditor. Do not add a subagent to double-check another subagent, to re-verify the auditor, or to split a lens across files — each lens is one dispatch over the whole diff.
 - **Don't re-derive the skill's logic.** Each skill encodes its own technique; the subagent invokes it. Pass the change, accept the output.
 - **Confidence calibration matters.** Pass through each finding's confidence label (low/medium/high). Low-confidence findings are still surfaced but called out as such.
 - **Auto-route, but explain.** Always tell the user which lenses you picked and why before dispatching subagents. They may want to override (e.g. "only legibility, the correctness is settled").

@@ -10,6 +10,6 @@ Real case: PR adds a new endpoint to a SaaS backend that calls a third-party bil
 
 **Rollout:** PR proposes deploying directly to all production. Finding: P1, propose feature flag defaulting to off, gradual ramp, with explicit kill-switch documented in the runbook.
 
-**Self-verification step caught:** an earlier draft of the report claimed the timeout was 30 seconds. Re-reading the code showed there was no timeout at all (the HTTP client used the Go default, which is unlimited). Reviewer corrected the finding from "raise the timeout to 5s" to "add a timeout, no current bound."
+**Audit pass caught:** an earlier draft of the report claimed the timeout was 30 seconds. Re-reading the code showed there was no timeout at all (the HTTP client used the Go default, which is unlimited). Reviewer corrected the finding from "raise the timeout to 5s" to "add a timeout, no current bound."
 
 **Net result:** 4 findings (1× P2, 3× P1). PR author accepted the feature flag, added per-endpoint metrics, and added the timeout. Soaked behind flag at 1%/10%/50% over 3 days before 100%.

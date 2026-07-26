@@ -160,10 +160,6 @@ Almost always wrong.
 - [ ] Change a CLI exit code without documenting (scripts branch on exit codes)
 - [ ] Public REST/gRPC endpoint removal with 404 instead of 410 + deprecation header
 
-## Self-Verification (before submitting findings)
-
-For each finding, re-read the migration SQL, the code that writes data, and the code that reads data. Confirm the cited risk is real. State which findings were verified by inspecting actual artifacts versus inferred from structure.
-
 ## Output Format
 
 Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.

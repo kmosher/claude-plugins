@@ -136,10 +136,6 @@ Output for perf findings: cite the specific line + the cost model (per-call allo
 - [ ] CHANGELOG missing for user-visible change
 - [ ] Tests that mock the failure mode they're testing
 
-## Self-Verification (before submitting findings)
-
-For each finding, re-read the cited code/config and confirm the claim. State which findings were verified by inspecting actual artifacts (deploy config, observability code, runbook) versus inferred from structure or naming. Drop unverified speculation or mark low-confidence.
-
 ## Output Format
 
 Return findings as JSONL using the canonical schema in `../SHARED_CONVENTIONS.md` §3. Rendering to markdown is the invoker's job.

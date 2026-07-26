@@ -1,6 +1,6 @@
 # Shared Conventions for `kmosher-review` Lens Skills
 
-Three conventions apply to every lens skill (`review-code`, `review-legibility`, `review-compatibility`, `review-releng`). Read this file when invoked. Each lens applies its own technique on top.
+Four conventions apply to every lens skill (`review-code`, `review-legibility`, `review-compatibility`, `review-releng`). Read this file when invoked. Each lens applies its own technique on top.
 
 Adapted from the github-bot's review prompt — patterns proven on an autonomous reviewer that ships findings without a human in the loop.
 
@@ -29,7 +29,7 @@ How to apply:
 
 ## 3. Findings buffer (also the output format)
 
-Don't emit findings as you discover them. **Buffer, dedupe, self-verify, then return.**
+Don't emit findings as you discover them. **Buffer, dedupe, then return.**
 
 Append candidates to `${TMPDIR:-/tmp}/review-findings-<lens>.jsonl` — one JSON object per line. **This buffer IS the lens's output.** Rendering to GitHub-flavored markdown, severity labels, suggestion blocks, etc. is the invoker's job, not the lens's. When invoked via `/review`, the coordinator does the rendering. When invoked directly, return the JSONL and let the caller decide.
 
@@ -55,10 +55,20 @@ Lens skills may add lens-specific fields (e.g. `heuristic_number` for `review-le
 When all techniques have run:
 
 1. **Dedupe** — same `file:line:category` → keep the higher-severity framing; merge `description`s.
-2. **Self-verify** — re-open each cited file, re-read the cited lines, confirm the claim is true *as written*. Drop findings you can't verify by reading actual code.
-3. **Sort** by severity (`P0` first), then `file`, then `line`.
-4. **Return** the JSONL block. When invoked from `/review`, paste the buffer contents inside a ` ```jsonl ` fenced block in the response, preceded by a one-paragraph meta note (what you read, what was settled, what was inferred). When invoked directly, the lens may also render a human-readable view *after* the JSONL block, but the JSONL must come first and unmodified.
+2. **Sort** by severity (`P0` first), then `file`, then `line`.
+3. **Return** the JSONL block. When invoked from `/review`, paste the buffer contents inside a ` ```jsonl ` fenced block in the response, preceded by a one-paragraph meta note (what you read, what was settled, what was inferred). When invoked directly, the lens may also render a human-readable view *after* the JSONL block, but the JSONL must come first and unmodified.
 
 Discard the buffer file when done.
 
-Why a buffer: pattern propagation (convention 2) needs an inventory; severity miscalibration only pops out when you see the full list at once; verification before emission catches the fabricated-finding class that wastes everyone's time; structured output lets the coordinator dedupe and verify mechanically instead of regexing markdown.
+Why a buffer: pattern propagation (convention 2) needs an inventory; severity miscalibration only pops out when you see the full list at once; structured output lets the coordinator dedupe and audit mechanically instead of regexing markdown.
+
+## 4. Report everything; filtering happens downstream
+
+**Emit every finding you believe is real, at whatever severity it lands.** A lens has no finding cap, no severity floor, and no quota. A P3 you're sure of belongs in the buffer next to a P0.
+
+Two things follow from this, and they are the whole reason the rule can be stated so bluntly:
+
+- **Filtering is a separate, later pass.** `/review` runs an independent auditor over the merged buffer and renders under the user's own thresholds. A lens that pre-trims is filtering on strictly less information than the pass built to do it — it can't see the other lenses' findings, the settled-issues list applied globally, or the repo's `REVIEW.md` thresholds as the coordinator resolved them.
+- **Trim on truth, not on volume.** Don't report a finding you don't believe: state confidence honestly, and if you couldn't establish the claim against actual code, say `low` rather than dropping it. But never drop a finding you *do* believe because the list is getting long. A long list of real findings is a correct result, and "nothing further surfaced" is also a correct result — report whichever one is true.
+
+Padding is still forbidden. Reporting everything real is not the same as manufacturing filler to hit a number; there is no number.

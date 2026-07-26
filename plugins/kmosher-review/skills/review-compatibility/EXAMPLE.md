@@ -17,6 +17,6 @@ Backend code reads `region` and routes requests accordingly. PR is a single comm
 
 **Reader/writer ordering check:** PR couples migration and code. If the code deploys before the migration finishes, new code reads `region` from a column that doesn't exist yet → 500s. Finding: P1, **required action:** ship migration alone, soak, verify column populated, then ship code that reads it.
 
-**Self-verification step caught:** an earlier draft claimed Postgres rewrites the table for ANY `ADD COLUMN ... NOT NULL DEFAULT`. Re-reading Postgres docs showed pg11+ optimizes non-volatile defaults to skip the rewrite. Reviewer corrected the finding to be conditional on PG version.
+**Audit pass caught:** an earlier draft claimed Postgres rewrites the table for ANY `ADD COLUMN ... NOT NULL DEFAULT`. Re-reading Postgres docs showed pg11+ optimizes non-volatile defaults to skip the rewrite. Reviewer corrected the finding to be conditional on PG version.
 
 **Net result:** 4 findings (2× P0, 2× P1). PR was split into three: (1) add column nullable + backfill job; (2) verify backfill complete + add NOT NULL with `NOT VALID`/`VALIDATE`; (3) deploy code that reads `region`, gated behind feature flag. `CREATE INDEX CONCURRENTLY` used throughout. Total deploy time: 2 days. Zero downtime.
