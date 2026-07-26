@@ -48,7 +48,7 @@ Findings get severity per the calibration below. The lens reports the named rule
 - **R-FRONTMATTER-PRESENT.** SKILL.md begins with YAML frontmatter delimited by `---` markers. *Source: Claude Code docs.*
 - **R-NAME-VALID.** If `name:` is present: lowercase letters, numbers, hyphens only; max 64 chars; matches the containing directory name exactly (case-sensitive). *Source: Claude Code docs.*
 - **R-DESCRIPTION-TRIGGERS.** `description:` states *when to invoke* (contexts, trigger phrases), not only *what the skill does*. Empty trigger surface ⇒ the skill won't load. *Source: skill-creator, skill-development, Claude Code docs.*
-- **R-DESCRIPTION-LENGTH.** Combined `description` (+ `when_to_use` if present) fits under 1,536 characters. Past that, the listing silently truncates. Key trigger in the first sentence. *Source: Claude Code docs.*
+- **R-DESCRIPTION-LENGTH.** `description` fits under **1,024 characters** (current Anthropic best-practices; older docs said 1,536). Treat it as a ceiling, not a target — it is always-resident context for *every* request across *all* installed skills, so aim well under it and spend the budget on the highest-value triggers. Key trigger in the first sentence. *Source: skill-creator/best-practices.*
 - **R-DESCRIPTION-VOICE.** `description:` is third-person ("This skill should be used when…"), not "Use this skill when you…" or imperative-to-the-user. *Source: skill-development.*
 - **R-BODY-VOICE.** SKILL.md body is imperative ("Parse the frontmatter"), not second-person ("You should parse the frontmatter"). *Source: skill-development.*
 - **R-REFERENCES-EXIST.** Every file path referenced from SKILL.md (`references/foo.md`, `scripts/bar.py`, `${CLAUDE_SKILL_DIR}/baz.sh`) actually exists in the tree after the PR. *Source: skill-creator, skill-development.*
@@ -62,9 +62,9 @@ Findings get severity per the calibration below. The lens reports the named rule
 
 ### Soft rules (should-fix)
 
-- **R-BODY-LENGTH.** Body under ~500 lines / ~2,000 words. Past that, split into SKILL.md (orchestration) + `references/*.md` (depth). *Source: skill-creator, skill-development.*
+- **R-BODY-LENGTH.** Body ≤ **~150 lines / ~1.5–2K tokens** — not the old ~500. Cross-ecosystem measurement puts the sweet spot near 150; past it, quality degrades *uniformly across all rules* (not just the new lines), so bloat weakens the instructions that matter. Flag bodies over ~200; split into SKILL.md (orchestration) + `references/*.md` (depth), or run the CRITIC pass from the `write-agent-skills` companion. *Source: cross-ecosystem (Augment eval-backed, Cursor, ed3d writing-claude-directives); Anthropic's 500 is the outlier.*
 - **R-REFS-HAVE-TOC.** Reference files >300 lines include a table of contents; >10k words also document grep patterns in SKILL.md for selective loading. *Source: skill-creator.*
-- **R-DESCRIPTION-EXAMPLES.** Description includes 3+ concrete trigger phrases in quotes (e.g. `"create a hook"`, `"add a PreToolUse hook"`). *Source: skill-development.*
+- **R-DESCRIPTION-EXAMPLES.** Description carries concrete quoted trigger phrases — but the *highest-value* ones, not a padded count. Every trigger is standing always-resident cost; enough to route unambiguously, no more. Don't flag a tight description for carrying only two strong triggers. *Source: skill-development, tempered by description-economy.*
 - **R-DESCRIPTION-PUSHY.** Description leans slightly pushy ("Make sure to use this skill whenever…") to combat undertriggering. *Source: skill-creator.*
 - **R-NO-DUPLICATION.** Information lives in SKILL.md OR a reference file, not both. *Source: skill-development.*
 - **R-VARIANTS-IN-REFS.** Multi-domain skills organize per-variant guidance under `references/<variant>.md` rather than inlining all variants in SKILL.md. *Source: skill-creator.*
@@ -77,7 +77,12 @@ Findings get severity per the calibration below. The lens reports the named rule
 - **A-DESCRIPTION-USE-THIS.** Description begins with "Use this skill when…", "Load when…", "Provides…", or any first/second-person phrasing.
 - **A-DESCRIPTION-NO-TRIGGERS.** Description has zero quoted trigger phrases and zero concrete scenarios.
 - **A-BODY-SECOND-PERSON.** SKILL.md body contains **directive** second-person constructions: "you should X", "you need to X", "you must X", or instructions addressed to a "you" subject ("Then you parse the frontmatter"). Imperative ("Parse the frontmatter") is the target. *Not* a violation: rhetorical-conditional ("if you can't trace concretely…"), idiomatic phrases ("a luxury you can't afford"), or "you" in a misconception/quote/table column where the construction is paraphrasing user thought.
-- **A-BLOATED-NO-REFS.** SKILL.md >500 lines AND `references/` is empty or missing.
+- **A-BLOATED-NO-REFS.** SKILL.md over ~200 lines AND `references/` is empty or missing — no progressive disclosure.
+- **A-DERIVABLE-CONTENT.** Body documents what the model already knows, or what a competent agent does anyway ("PDF is a file format…", "check the logs"). Pure token cost.
+- **A-BODY-TRIGGER-PILE.** A body section listing invocation/trigger phrases (e.g. "Example Invocations"). Routing lives in `description`; the body copy is dead weight that duplicates it.
+- **A-REPEATED-LITERAL.** A long literal — command prefix, path, fully-qualified identifier — repeated in full many times instead of a shorthand defined once. (Only when it recurs enough to pay for the definition and the short form stays unambiguous.)
+- **A-BARE-DONT.** A prohibition with no positive alternative ("don't create duplicates"). A lone "don't X" cues X — state the positive ("update in place") or pair them.
+- **A-UNDEFINED-JARGON.** A coined term, term-of-art, or type-taxonomy (e.g. "discipline skill", "operational skill") the reader can't resolve from common knowledge, the skill's own text, or accessible accompanying material (linked docs, memories). Fix: define it inline, link where it's defined, or replace it with a behavioral description.
 - **A-ORPHAN-SUPPORT.** `references/`, `scripts/`, or `examples/` directories exist but are not mentioned anywhere in SKILL.md.
 - **A-NAME-CASE.** `name:` present but contains uppercase, underscores, spaces, or doesn't match directory name exactly.
 - **A-RENAME-STALE.** Skill renamed in the diff but the old name still appears in this skill's frontmatter, body, or cross-references.

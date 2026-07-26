@@ -222,6 +222,21 @@ Go repos):
 
 ---
 
+## Markdown (skills, docs)
+
+1. **Formatter parity**: `prettier --prose-wrap always --print-width 100 --check <changed .md files>`
+   — reflow drift on skill files and docs. If the project pins its own prettier
+   config (`.prettierrc`, `package.json#prettier`), drop the flags and honor it.
+2. Fix mode is the same command with `--write` — the `write-agent-skills` REFLOW
+   step; safe to apply, prettier is semantic-preserving on markdown.
+
+### What to surface
+
+- **High-confidence**: drift on changed files only. Untouched-file drift is
+  pre-existing; don't surface it.
+
+---
+
 ## Adding a new language
 
 When you find yourself running ad-hoc lint commands for a language not listed
