@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), Bash(grep:*), Bash(rg:*), Bash(ls:*), Bash(find:*), Bash(wc:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Read, Write, Glob, Grep, Skill, Agent
+allowed-tools: Bash(git:*), Bash(gh:*), Bash(grep:*), Bash(rg:*), Bash(ls:*), Bash(find:*), Bash(wc:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(sort:*), Bash(node:*), Read, Write, Glob, Grep, Skill, Agent
 description: Lightweight router that picks the right code-review skill(s) for the current change, runs them in the right order, and aggregates findings
 disable-model-invocation: false
 ---
@@ -11,6 +11,7 @@ You are routing a code review across the available `kmo` review skills:
 - **`review-compatibility`** — compat across deploy / caller boundaries: data shape (DDL, message formats, stored state) AND interface (exported signatures, public APIs, config keys, env vars, CLI flags, behavior semantics). Optional: use when the change crosses any of those boundaries.
 - **`review-releng`** — operational readiness via revertability/blast-radius/observability/rollout checklist + deployment patterns + anti-patterns. Optional: use for changes touching production services, deploy infra, or anything that could page someone.
 - **`review-agent-skills`** — skill-authoring quality for Claude Code skills, slash commands, and plugin manifests: frontmatter schema, description-as-trigger, body voice, supporting-file references, side-effect safety, rename consistency. Optional: use when the diff touches `**/skills/<name>/`, `**/commands/<name>.md`, `**/agents/<name>.md`, or `.claude-plugin/*.json`.
+- **`codex`** — not a skill: a second opinion from a non-Claude model, via OpenAI's `codex` CLI. Every lens above shares one model's blind spots, and an auditor drawn from that same model cannot see past them. Runs whenever the CLI is present and authenticated — see Step 4.4.
 
 ## What this command does
 
@@ -22,6 +23,7 @@ Given a PR or branch (default: the current branch), this command:
 2. **Classifies the change** to decide which review lenses apply.
 3. **Runs automated lint/diagnostic tooling** appropriate to the languages in the diff (Go, TypeScript, Rust, …) — see Step 2.5 and the sibling file `review-automated-checks.md`.
 4. **Runs the relevant skills in the right order**, each in an isolated subagent that invokes the lens skill in its own context.
+4.4. **Cross-model pass** — shells out to OpenAI's `codex` for an independent review of the same diff, mapped into the canonical finding schema.
 4.5. **Auditor pass** — an Opus subagent re-checks each finding against the actual code, separating claims that don't hold from claims that do, and recalibrating severity.
 5. **Aggregates findings** across automated tools, skill lenses, and the auditor; deduplicates; produces a single prioritized report with GitHub permalink citations.
 6. **Offers to post the report as a PR comment** (skipped if `$ARGUMENTS` includes `local`, no PR exists, or no findings survived).
@@ -209,6 +211,10 @@ the task where a cheaper model's misses are invisible: a lens that fails to
 notice a bug returns the same clean-looking JSONL as a lens that correctly found
 nothing.
 
+Step 4.4 is outside this policy — it is deliberately not a Claude model, which
+is the only reason it can see what Opus cannot. Its model is whatever the user's
+`codex` CLI is configured to use; do not pass `--model` to override it.
+
 Sonnet is the floor, used only for the steps that gather rather than judge:
 the eligibility gate (Step 0), prior-PR mining (Step 1.5), and the lint sweep
 (Step 2.5). Each of those transcribes or summarizes something already
@@ -236,7 +242,12 @@ Routing this change through:
   3. review-releng (touches production service)
   4. review-agent-skills (touches plugins/foo/skills/bar/SKILL.md)
   5. review-legibility (always)
+  + codex cross-model pass (Step 4.4)
 ```
+
+The codex pass is not part of this ordering — it reviews the same diff
+independently and runs after the lenses finish, so nothing it reports can be
+invalidated by a lens that ran later.
 
 ### Step 4: Run each selected skill **in a subagent**
 
@@ -296,6 +307,86 @@ After each subagent returns:
 - If only P1/P2/P3 emerged, continue to the next lens. The user can address them in batch.
 - The orchestrator's context now contains only the structured findings text (a few KB per lens), not the file reads or the skill body — that's the whole point of this step.
 
+### Step 4.4: Cross-model pass (codex)
+
+Everything upstream of here is one model reviewing code, and Step 4.5 is that
+same model checking its own work. This step is the only one that can catch a bug
+the whole Claude-side pipeline is constitutionally unable to see. Its findings
+are not privileged — they go through the auditor exactly like a lens's do — but
+they originate outside the family.
+
+This is a `Bash` shell-out, not a subagent: `codex` is its own agent with its own
+context, so wrapping it in one would only add a translation layer.
+
+**Locate the companion script.** `openai/codex-plugin-cc` ships it; the router
+cannot use `/codex:review` directly because that command sets
+`disable-model-invocation: true`, and `CLAUDE_PLUGIN_ROOT` is only defined inside
+that plugin's own commands. Glob for it and take the highest version:
+
+```bash
+ls -d ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1
+```
+
+If the glob is empty, skip this step and record the reason as
+"codex-plugin-cc not installed". Do not fall back to bare `codex review` — its
+output is prose with no schema, and mapping it is guesswork.
+
+**Run the adversarial subcommand, not `review`.** They differ in output, not just
+tone: `review` returns Codex's own prose in `.codex.stdout`, while
+`adversarial-review` constrains the model to the plugin's
+`schemas/review-output.schema.json` and returns validated JSON at `.result`.
+Only the latter is mechanically consumable.
+
+```bash
+node <companion> adversarial-review --wait --json --base <base ref> --cwd <repo path>
+```
+
+Pass the change scope the same way the lenses got it — `--base origin/master`
+for a branch review. Add focus text as a trailing positional argument only if
+`$ARGUMENTS` carried a lens override worth forwarding; otherwise let Codex pick
+its own angle, which is the point of asking a different model.
+
+A full review takes minutes on a real diff — give the `Bash` call a timeout in
+the 5–10 minute range rather than letting the default kill a run that was working.
+
+**Failures here must be named, not absorbed.** A zero-finding return from a broken
+run looks exactly like a clean review, so treat this step as skipped-with-reason
+on *any* non-zero exit, quoting the last stderr line. Three causes are common
+enough to recognize:
+
+- `failed to initialize sqlite state runtime under ~/.codex` — Codex needs to
+  write its state DB, and the run dies without it. Under a Claude Code sandbox
+  that denies `~/.codex`, this fires every time, so it is the expected failure
+  rather than an unlucky one.
+- Auth errors — `codex login` was never run, or the stored ChatGPT token expired.
+  `codex doctor` reports auth state; suggest it in the skip reason rather than
+  attempting a login from inside a review.
+- `.parseError` non-null on a zero exit — the model returned something that failed
+  schema validation. Report the parse error and do not try to salvage findings
+  from `.rawOutput`.
+
+**Map `.result.findings[]` into the canonical schema.** The plugin's shape is not
+`SHARED_CONVENTIONS.md` §3; translate each finding:
+
+| Codex field | Canonical field | Mapping |
+|---|---|---|
+| `severity` | `severity` | `critical`→P0, `high`→P1, `medium`→P2, `low`→P3 |
+| `confidence` (0.0–1.0) | `confidence` | `<0.5` low, `0.5–0.8` medium, `>0.8` high |
+| `title` + `body` | `description` | title as the claim, body as the detail |
+| `recommendation` | `recommendation` | verbatim |
+| `file`, `line_start` | `file`, `line` | strip any absolute prefix to repo-relative |
+| `line_start`/`line_end` | `permalink` | same `≥1 line of context` rule as Step 4 |
+
+Set `category` to what the finding is about, and tag every one with lens `codex`
+so Step 5 can attribute it. `.result.verdict` and `.result.summary` are Codex's
+own framing — record the verdict in the Step 5 summary line, and discard the
+summary rather than blending it into the report's voice.
+
+**Cost note:** this step bills to the user's ChatGPT/Codex subscription, not
+their Claude usage. It is the one step in this command whose budget the user
+manages elsewhere, so `$ARGUMENTS` containing `skip codex` or `no codex` must
+suppress it.
+
 ### Step 4.5: Auditor pass
 
 The lenses report everything they believe is real and do no filtering of their
@@ -321,7 +412,8 @@ Dispatch via `Agent(subagent_type="general-purpose", description="Findings audit
 - **Goal**: audit each finding against the actual code; produce a verdict per finding. Output is folded into the final report.
 - **Repo path**: `<absolute path>`
 - **Owner/repo, full SHA**: pass through from Step 1.
-- **Findings to verify**: the concatenated JSONL `findings` blocks from every lens in Step 4. Assign each finding a stable global index (`<lens>:<n>`, e.g. `code:0`, `legibility:3`).
+- **Findings to verify**: the concatenated JSONL `findings` blocks from every lens in Step 4, plus the mapped Codex findings from Step 4.4. Assign each finding a stable global index (`<lens>:<n>`, e.g. `code:0`, `legibility:3`, `codex:1`).
+- **Do not discount a finding for coming from Step 4.4.** The auditor's test is whether the cited code supports the claim, and a cross-model finding that survives that test is worth more than a same-model one, not less — it is evidence the Claude-side lenses missed something. "No Claude lens raised this" is not a reason to mark it `false-positive`.
 - **Settled issues + prior guidance**: pass through from Step 1.5. The auditor uses these to mark findings that re-raise adjudicated concerns.
 - **For each finding, the auditor does**:
   1. `Read` the file + cited `line` (with a few lines of context). Confirm the cited code matches the `description`.
@@ -411,6 +503,7 @@ Final report format:
 Lenses run: <list>
 Lenses skipped: <list, with one-line reason each>
 Automated tools run: <list>
+Cross-model (codex): <verdict + finding count | skipped: reason>
 Auditor: <n findings audited; n dropped as false-positive; n severity changes; n settled/pre-existing>
 
 ## Findings by severity
@@ -495,6 +588,7 @@ Do not auto-post without clear intent or confirmation. Posting to a PR is visibl
 - A PR number (e.g. `3405` or `#3405`)
 - A branch name
 - An override phrase (e.g. `only legibility`, `skip migration`, `all lenses`, `quick`)
+- `skip codex` / `no codex` — suppresses the Step 4.4 cross-model pass, which bills to the user's ChatGPT subscription rather than their Claude usage
 - `local` (or `local review`, `no post`, `don't post`) — suppresses the Step 6 offer to post the report as a PR comment
 - Combinations (e.g. `3405 only code`, `3405 skip legibility`, `3405 local`)
 
