@@ -66,6 +66,7 @@ skip verdict and proceed anyway.
 Run these in parallel:
 
 - `git rev-parse HEAD` — current commit SHA
+- `git merge-base origin/main HEAD` — full base SHA (fall back to `origin/master`). Record it alongside the head SHA: fast-forward folds erase the branch point, so the base is not reconstructible after the fact.
 - `git rev-parse --abbrev-ref HEAD` — current branch
 - `git log --oneline origin/main..HEAD` — commits in the change (fall back to `origin/master` if `origin/main` doesn't exist)
 - `git diff --stat origin/main..HEAD` — files touched + line counts
@@ -552,6 +553,51 @@ the decision is visible and can be revisited, not because they block anything.
 ```
 
 If no findings survived the audit: say so explicitly. The PR is ready to merge from these lenses' perspectives. Mention how many findings the auditor dropped as false positives so the user knows it ran and did its job.
+
+### Step 5.5: Persist the run record (best-effort)
+
+Everything a later evaluation of these skills would need coexists only here, in
+the orchestrator's context, and is gone once the session ends. Write it down.
+
+This step is bookkeeping and must never block, fail, or alter the review. If
+anything goes wrong — no capture root, an unwritable path, a command that
+returns nonzero — abandon the step silently and go to Step 6. Never report a
+capture problem to the user, never retry, never ask.
+
+Capture root: the first of `$REVIEWBENCH_DIR`, `~/.cache/metawork/reviewbench`,
+`~/.reviewbench` that **already exists** as a directory. Do not create one —
+the directory's existence is the opt-in. If none exists, skip the step.
+
+Otherwise write a bundle to `<root>/incoming/<run-id>/`, where run-id is
+`<YYYYMMDD-HHMM>-<repo basename>-<short head SHA>` (with no commit to name, use
+`wip-` plus the first 8 characters of the session id):
+
+- `manifest.json` — the fields below, `null` for anything unknown.
+- `findings-<lens>.jsonl` — one file per lens, that lens's Step 4 `findings`
+  block verbatim and **pre-audit**: no verdicts applied, no dedupe, no severity
+  relabeling. Codex findings (Step 4.4) go to `findings-codex.jsonl`.
+- `verdicts.jsonl` — the auditor's Step 4.5 block verbatim. Omit the file if the
+  auditor didn't run.
+- `diff.patch` — the full unified diff against the base SHA. On a dirty tree
+  this must include the uncommitted changes the lenses actually reviewed
+  (`git diff <base sha>` plus the contents of any untracked files), not just
+  committed work.
+- `report.md` — the rendered report from Step 5.
+
+```json
+{
+  "run_id": "…", "captured_at": "<ISO 8601>", "source": "review-router",
+  "repo_path": "<absolute path>", "repo": "<owner/repo>", "branch": "…",
+  "base_sha": "…", "head_sha": "…", "uncommitted": false,
+  "plugin_version": "<version from this plugin's plugin.json>",
+  "review_md_sha256": "<sha256 of REVIEW.md, null if absent>",
+  "lenses": ["code", "legibility"], "models": {"code": "<model>"},
+  "session_id": "…", "notes": "<anything odd about this run, else empty>"
+}
+```
+
+On success add exactly one line to the final output — `run captured to <path>`.
+On a skip, say nothing at all.
 
 ### Step 6: Offer to post the report to the PR
 

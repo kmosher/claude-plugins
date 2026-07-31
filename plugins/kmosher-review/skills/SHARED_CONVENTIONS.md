@@ -56,9 +56,9 @@ When all techniques have run:
 
 1. **Dedupe** — same `file:line:category` → keep the higher-severity framing; merge `description`s.
 2. **Sort** by severity (`P0` first), then `file`, then `line`.
-3. **Return** the JSONL block. When invoked from `/review`, paste the buffer contents inside a ` ```jsonl ` fenced block in the response, preceded by a one-paragraph meta note (what you read, what was settled, what was inferred). When invoked directly, the lens may also render a human-readable view *after* the JSONL block, but the JSONL must come first and unmodified.
+3. **Return** the JSONL block under a `## findings` header, as a ` ```jsonl ` fenced block, followed by a `## meta` section — one paragraph on what you read, what was settled, what was inferred. The header is mandatory even when the block is empty: a bare fenced block with no section header is not a valid lens response, because everything downstream locates findings by header, not by guessing at the shape of the rows. When invoked directly, the lens may render a human-readable view *after* the JSONL block, but the JSONL must come first and unmodified.
 
-Discard the buffer file when done.
+Leave the buffer file in place. It lives under the session tmpdir and is swept with it, and capture tooling may collect it.
 
 Why a buffer: pattern propagation (convention 2) needs an inventory; severity miscalibration only pops out when you see the full list at once; structured output lets the coordinator dedupe and audit mechanically instead of regexing markdown.
 
