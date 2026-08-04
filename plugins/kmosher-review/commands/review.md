@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), Bash(grep:*), Bash(rg:*), Bash(ls:*), Bash(find:*), Bash(wc:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(sort:*), Bash(node:*), Read, Write, Glob, Grep, Skill, Agent
+allowed-tools: Bash(git:*), Bash(gh:*), Bash(grep:*), Bash(rg:*), Bash(ls:*), Bash(find:*), Bash(wc:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(sort:*), Bash(node:*), Bash(date:*), Bash(shasum:*), Bash(sha256sum:*), Read, Write, Glob, Grep, Skill, Agent
 description: Lightweight router that picks the right code-review skill(s) for the current change, runs them in the right order, and aggregates findings
 disable-model-invocation: false
 ---
@@ -66,7 +66,8 @@ skip verdict and proceed anyway.
 Run these in parallel:
 
 - `git rev-parse HEAD` — current commit SHA
-- `git merge-base origin/main HEAD` — full base SHA (fall back to `origin/master`). Record it alongside the head SHA: fast-forward folds erase the branch point, so the base is not reconstructible after the fact.
+- `git merge-base origin/main HEAD` — full base SHA (fall back to `origin/master`)
+- `date -u +%Y-%m-%dT%H:%M:%SZ` — review start time, for Step 5.5's `started_at`
 - `git rev-parse --abbrev-ref HEAD` — current branch
 - `git log --oneline origin/main..HEAD` — commits in the change (fall back to `origin/master` if `origin/main` doesn't exist)
 - `git diff --stat origin/main..HEAD` — files touched + line counts
@@ -565,31 +566,41 @@ returns nonzero — abandon the step silently and go to Step 6. Never report a
 capture problem to the user, never retry, never ask.
 
 Capture root: the first of `$REVIEWBENCH_DIR`, `~/.cache/metawork/reviewbench`,
-`~/.reviewbench` that **already exists** as a directory. Do not create one —
-the directory's existence is the opt-in. If none exists, skip the step.
+`~/.reviewbench` that **already exists** as a directory; if none exists, the
+machine has not opted in — skip the step. Never create one: the directory's
+existence is the opt-in.
 
 Otherwise write a bundle to `<root>/incoming/<run-id>/`, where run-id is
-`<YYYYMMDD-HHMM>-<repo basename>-<short head SHA>` (with no commit to name, use
-`wip-` plus the first 8 characters of the session id):
+`<YYYYMMDD-HHMM>-<repo>-<short head SHA>-<sess8>` — `<repo>` the repo basename,
+`<sess8>` the first 8 characters of the session id, and the timestamp UTC from
+`date -u +%Y%m%d-%H%M`, never derived by the model. With no commit to name,
+`wip` replaces the SHA field alone: `20260731-1412-metawork-wip-a1b2c3d4`.
 
 - `manifest.json` — the fields below, `null` for anything unknown.
 - `findings-<lens>.jsonl` — one file per lens, that lens's Step 4 `findings`
   block verbatim and **pre-audit**: no verdicts applied, no dedupe, no severity
-  relabeling. Codex findings (Step 4.4) go to `findings-codex.jsonl`.
+  relabeling. `<lens>` is the short lens name, spelled exactly as in the
+  manifest's `lenses` array and the auditor's verdict keys — the six legal
+  names are `findings-code.jsonl`, `findings-legibility.jsonl`,
+  `findings-compatibility.jsonl`, `findings-releng.jsonl`,
+  `findings-agent-skills.jsonl`, and `findings-codex.jsonl` (Step 4.4).
 - `verdicts.jsonl` — the auditor's Step 4.5 block verbatim. Omit the file if the
   auditor didn't run.
-- `diff.patch` — the full unified diff against the base SHA. On a dirty tree
-  this must include the uncommitted changes the lenses actually reviewed
-  (`git diff <base sha>` plus the contents of any untracked files), not just
-  committed work.
+- `diff.patch` — a real unified diff against the base SHA, one that `git apply`
+  would accept. On a dirty tree it must cover the uncommitted changes the
+  lenses actually reviewed: run `git diff <base sha>`, then append one
+  `git diff --no-index /dev/null <file>` per untracked file. Never concatenate
+  raw file contents — bytes with no `diff --git`/`@@` headers are not a patch.
 - `report.md` — the rendered report from Step 5.
 
 ```json
 {
-  "run_id": "…", "captured_at": "<ISO 8601>", "source": "review-router",
-  "repo_path": "<absolute path>", "repo": "<owner/repo>", "branch": "…",
+  "run_id": "…", "captured_at": "<ISO 8601 UTC>", "source": "review-router",
+  "repo_path": "<absolute path>", "repo": "<bare repo basename>",
+  "owner_repo": "<owner/repo, null if no GitHub remote>", "branch": "…",
   "base_sha": "…", "head_sha": "…", "uncommitted": false,
-  "plugin_version": "<version from this plugin's plugin.json>",
+  "started_at": "<ISO 8601 UTC>", "ended_at": "<ISO 8601 UTC>",
+  "plugin_version": "<the version field of ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>",
   "review_md_sha256": "<sha256 of REVIEW.md, null if absent>",
   "lenses": ["code", "legibility"], "models": {"code": "<model>"},
   "session_id": "…", "notes": "<anything odd about this run, else empty>",
@@ -597,14 +608,26 @@ Otherwise write a bundle to `<root>/incoming/<run-id>/`, where run-id is
 }
 ```
 
+Fields consumers are strict about:
+
+- `repo` is the bare basename and `owner_repo` the GitHub slug. Every reader
+  keys the slug off `owner_repo` and none falls back to `repo`, so a slug
+  written into `repo` reads as a repo named `owner/repo` and the run is skipped.
+- `base_sha` is Step 1's merge-base, recorded now because fast-forward folds
+  erase the branch point — the base is not reconstructible after the fact.
+- `started_at` is Step 1's timestamp, `ended_at` the capture time. They are the
+  search window downstream uses to match this run against later commits.
+- Every timestamp is ISO 8601 UTC from `date -u`, never model-derived.
+
 The three `posted_*` fields stay null here; Step 6 fills them if the report is
 posted. They record which PR this review was actually of — the one fact that
 ties a run to a PR by observation rather than inference. Everything downstream
 otherwise has to guess it back from SHAs and branch names, and guesses wrong
 often enough to matter.
 
-On success add exactly one line to the final output — `run captured to <path>`.
-On a skip, say nothing at all.
+On success add exactly one line to the chat output, after the report —
+`run captured to <path>`. It goes nowhere else: not into `report.md`, not into
+the comment Step 6 posts. On a skip, say nothing at all.
 
 ### Step 6: Offer to post the report to the PR
 
@@ -627,14 +650,20 @@ Do not auto-post without clear intent or confirmation. Posting to a PR is visibl
 **After a successful post, record where it went.** `gh pr comment` prints the
 new comment's URL, whose `#issuecomment-<id>` fragment is the comment id. If
 Step 5.5 wrote a bundle and `<root>/incoming/<run-id>/manifest.json` is still
-there, set its three `posted_*` fields — `posted_pr` the PR number,
-`posted_comment_id` that id, `posted_at` the current time — and change nothing
-else in the file.
+there, set its three `posted_*` fields — `posted_pr` the PR number **as a JSON
+integer**, `posted_comment_id` that id, `posted_at` the current time from
+`date -u` — and change nothing else in the file.
+
+Do the manifest update in the same turn as the `gh pr comment` call. The user's
+yes/no is a new message, which ends the `allowed-tools` grant `/review` was
+invoked under — the post is already outside it, and keeping the write beside the
+post means one permission state to settle instead of two. A prompt on either is
+tolerated, not avoided: answer or decline and move on. The review itself is
+complete by this point, so the step still never blocks and never retries.
 
 Skip silently if the bundle is gone: an ingest pass has already taken it, and
 re-creating the directory would hand ingest a second, conflicting record of a
-run it has finished with. Same rules as Step 5.5 — never block, never retry,
-never mention it.
+run it has finished with.
 
 ## Notes for the orchestrator
 
