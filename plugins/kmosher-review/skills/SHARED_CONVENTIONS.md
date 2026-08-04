@@ -1,6 +1,6 @@
 # Shared Conventions for `kmosher-review` Lens Skills
 
-Four conventions apply to every lens skill (`review-code`, `review-legibility`, `review-compatibility`, `review-releng`). Read this file when invoked. Each lens applies its own technique on top.
+Four conventions apply to every lens skill (`review-code`, `review-legibility`, `review-compatibility`, `review-releng`, `review-agent-skills`). Read this file when invoked. Each lens applies its own technique on top.
 
 Adapted from the github-bot's review prompt — patterns proven on an autonomous reviewer that ships findings without a human in the loop.
 
@@ -31,7 +31,7 @@ How to apply:
 
 Don't emit findings as you discover them. **Buffer, dedupe, then return.**
 
-Append candidates to `${TMPDIR:-/tmp}/review-findings-<lens>.jsonl` — one JSON object per line. **This buffer IS the lens's output.** Rendering to GitHub-flavored markdown, severity labels, suggestion blocks, etc. is the invoker's job, not the lens's. When invoked via `/review`, the coordinator does the rendering. When invoked directly, return the JSONL and let the caller decide.
+Append candidates to `${TMPDIR:-/tmp}/review-findings-<lens>.jsonl` — one JSON object per line. **The buffer is where findings accumulate; the response carries them under `## findings`** (see Process below). Rendering to GitHub-flavored markdown, severity labels, suggestion blocks, etc. is the invoker's job, not the lens's — when invoked via `/review`, the coordinator does it.
 
 ### Canonical finding schema
 
@@ -56,9 +56,9 @@ When all techniques have run:
 
 1. **Dedupe** — same `file:line:category` → keep the higher-severity framing; merge `description`s.
 2. **Sort** by severity (`P0` first), then `file`, then `line`.
-3. **Return** the JSONL block under a `## findings` header, as a ` ```jsonl ` fenced block, followed by a `## meta` section — one paragraph on what you read, what was settled, what was inferred. The header is mandatory even when the block is empty: a bare fenced block with no section header is not a valid lens response, because everything downstream locates findings by header, not by guessing at the shape of the rows. When invoked directly, the lens may render a human-readable view *after* the JSONL block, but the JSONL must come first and unmodified.
+3. **Return** the JSONL block under a `## findings` header, as a ` ```jsonl ` fenced block, followed by a `## meta` section — one paragraph on what you read, what was settled, what was inferred. The header is mandatory even when the block is empty: a bare fenced block with no section header is not a valid lens response, because everything downstream locates findings by header, not by guessing at the shape of the rows. When invoked directly, the lens may render a human-readable view *after* the JSONL block, but the JSONL must come first and unmodified. Under `/review` a third section is required in addition, `## upstream_reading` between the other two: one JSONL row per file you read outside the diff, `{"path": "<path>", "told_me": "<one-line summary>"}`.
 
-Leave the buffer file in place. It lives under the session tmpdir and is swept with it, and capture tooling may collect it.
+Leave the buffer file in place — it lives under the session tmpdir and is swept with it.
 
 Why a buffer: pattern propagation (convention 2) needs an inventory; severity miscalibration only pops out when you see the full list at once; structured output lets the coordinator dedupe and audit mechanically instead of regexing markdown.
 
