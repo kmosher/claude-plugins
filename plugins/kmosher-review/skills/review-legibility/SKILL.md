@@ -72,6 +72,26 @@ Each is a *test* the reviewer applies and flags failures. Concrete enough that t
 | 10 | Tests as documentation | Read only test name + top-level asserts; does the contract emerge? | If you must read the body, the test isn't documenting behavior |
 | 11 | Comment density and lead | For each multi-sentence comment: lead test, mechanism-restatement check, hedge-and-passive sweep, load-bearing test. **Hand non-trivial rewrites to the `comment-writer` agent** — don't draft them yourself. Bake-off when uncertain. | Bidirectional failure mode: too verbose buries the take-home; too terse cuts load-bearing context. Default to leaving alone when the load-bearing test passes; delegate rewrites to the agent. |
 
+### Deferred comment judgment
+
+An invocation may state that **comment judgment is deferred** — the caller runs a
+dedicated comment pass after this review (`kmo:finalize`: condense, then a
+blank-slate justify pass, then `comment-writer` over the survivors). When it does:
+
+- Skip heuristics 2 and 11, and do not invoke `comment-writer`. Both decide
+  whether a comment's prose should shrink, grow, or go — the same call the later
+  pass makes from a better seat, having read the code stripped of its comments.
+  Prose polished here is prose that pass may simply delete.
+- Everything else still applies. Heuristics 6, 7, and 8 flag comments that are
+  *wrong* or *misplaced* — a stale reference, an iteration scar, a block whose
+  real fix is extracting a function. The later pass edits comment text in place
+  and never makes those calls.
+- Note the deferral in `meta`, so a reader knows the comment-density findings are
+  absent by design rather than because the diff was clean.
+
+Absent that instruction, run all eleven: a standalone legibility review owns
+comment prose, and nothing downstream will pick it up.
+
 ## Severity Calibration
 
 - **P1** — actively misleads readers (stale reference, comment claims X but code does Y, name promises wrong behavior). Should block merge.

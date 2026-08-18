@@ -24,6 +24,8 @@ Files: <list>
 
 For each test, list every failure with file:line, what the failure looks like, and a concrete proposed cleanup (sketch the refactor structure, not just "make it clearer").
 
+[Keep this line only if the invocation defers comment judgment to a later dedicated comment pass; then drop tests 2 and 11 below, and the comment-writer delegation in test 11's step 5 — see SKILL.md's "Deferred comment judgment". Otherwise delete this line.]
+
 ### Test 1: One-sentence purpose
 For each function in the change, write its purpose in one sentence with no "and"/"also". A function that needs two clauses is doing two things.
 

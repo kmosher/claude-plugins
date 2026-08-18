@@ -272,6 +272,7 @@ Call `Agent(subagent_type="general-purpose", description="<lens> review", model=
 - **Diff**: paste the full unified diff (or, if huge, the file list + per-file hunk ranges and instructions to read full files from disk). The subagent will read further files itself.
 - **PR description** (if any): paste verbatim.
 - **Settled-issues list** (if the user provided one as `$ARGUMENTS`): paste verbatim, mark as DO NOT raise.
+- **Deferred comment judgment** — for `review-legibility` only, and only when `$ARGUMENTS` includes `defer-comment-judgment`: tell the subagent that comment judgment is deferred to a dedicated comment pass running after this review, so the lens's "Deferred comment judgment" rule applies. Never pass this to another lens; no other lens has the rule.
 - **Repo-local `REVIEW.md`** (from Step 1, if present): paste the file's contents verbatim under a clearly labeled heading. Instruct the subagent that `REVIEW.md` rules **override** the skill's defaults — severity calibration, what to flag, what to skip, output shape. If `REVIEW.md` declares codebase precedents (e.g. "trusted env vars", "no XSS in React unless `dangerouslySetInnerHTML`"), the subagent must NOT flag findings predicated on violating those precedents.
 - **Prior PR context** (from Step 1.5): paste both the "Applicable prior guidance" and "Settled issues — DO NOT re-raise" lists. The subagent treats the latter as additional settled issues.
 - **Automated findings from Step 2.5** (if run): paste them so the subagent doesn't re-surface mechanical issues. The subagent may cross-reference but should not duplicate.
@@ -684,6 +685,7 @@ run it has finished with.
 - An override phrase (e.g. `only legibility`, `skip migration`, `all lenses`, `quick`)
 - `skip codex` / `no codex` — suppresses the Step 4.4 cross-model pass, which bills to the user's ChatGPT subscription rather than their Claude usage
 - `local` (or `local review`, `no post`, `don't post`) — suppresses the Step 6 offer to post the report as a PR comment
+- `defer-comment-judgment` — `review-legibility` leaves comment prose to a dedicated comment pass running after this review, and still returns its structural and misleading-comment findings. Set by `kmo:polish`, whose next stage is `kmo:finalize`; pass it by hand only when something comparable follows.
 - Combinations (e.g. `3405 only code`, `3405 skip legibility`, `3405 local`)
 
 If empty, default to the current branch with auto-routing.
