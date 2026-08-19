@@ -75,17 +75,19 @@ Each is a *test* the reviewer applies and flags failures. Concrete enough that t
 ### Deferred comment judgment
 
 An invocation may state that **comment judgment is deferred** — the caller runs a
-dedicated comment pass after this review (`kmo:finalize`: condense, then a
-blank-slate justify pass, then `comment-writer` over the survivors). When it does:
+dedicated comment pass after this review (`kmo:finalize`, which strips every
+comment from the changed files and keeps only the ones a reader who never saw
+them demonstrably needed). When it does:
 
 - Skip heuristics 2 and 11, and do not invoke `comment-writer`. Both decide
   whether a comment's prose should shrink, grow, or go — the same call the later
   pass makes from a better seat, having read the code stripped of its comments.
-  Prose polished here is prose that pass may simply delete.
+  That pass keeps, trims, or deletes and never rewrites, so prose polished here
+  is prose it may simply delete.
 - Everything else still applies. Heuristics 6, 7, and 8 flag comments that are
   *wrong* or *misplaced* — a stale reference, an iteration scar, a block whose
-  real fix is extracting a function. The later pass edits comment text in place
-  and never makes those calls.
+  real fix is extracting a function. The later pass cuts comment text or leaves
+  it alone, and never makes those calls.
 - Note the deferral in `meta`, so a reader knows the comment-density findings are
   absent by design rather than because the diff was clean.
 
