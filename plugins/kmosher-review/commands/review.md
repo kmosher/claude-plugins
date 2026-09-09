@@ -577,6 +577,24 @@ Otherwise write a bundle to `<root>/incoming/<run-id>/`, where run-id is
 `date -u +%Y%m%d-%H%M`, never derived by the model. With no commit to name,
 `wip` replaces the SHA field alone: `20260731-1412-metawork-wip-a1b2c3d4`.
 
+**The session id is the harness's own UUID** — the `3131ad55-…` form that names
+this session's transcript directory — and never the `session_01Abc…` id that
+appears in share links and attribution footers. Every consumer joins on the
+UUID: the SubagentStop hook stamps its fragments with it, and ingest's only
+means of attaching a lens fragment to the run that dispatched it is
+`session_id` equality. A share id here does not degrade the join, it removes
+it, and the bundle's own lenses are stranded as orphans beside it. The footer
+form is the one on display in most sessions, so read the id off the transcript
+path rather than off any prose in context, and write it whole into
+`session_id`, not just the eight characters the run-id uses.
+
+Write `manifest.json` **first**, before the findings, the diff or the report,
+and patch `ended_at` into it at the close. It is the file that makes everything
+beside it ingestible: a bundle without one is quarantined whole, however much
+else it holds. Everything the manifest needs is known at Step 1, and a review
+can be interrupted at any point after that — writing it last means the one file
+that unlocks the other artifacts is the one least likely to survive.
+
 - `manifest.json` — the fields below, `null` for anything unknown.
 - `findings-<lens>.jsonl` — one file per lens, that lens's Step 4 `findings`
   block verbatim and **pre-audit**: no verdicts applied, no dedupe, no severity
@@ -604,7 +622,8 @@ Otherwise write a bundle to `<root>/incoming/<run-id>/`, where run-id is
   "plugin_version": "<the version field of ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>",
   "review_md_sha256": "<sha256 of REVIEW.md, null if absent>",
   "lenses": ["code", "legibility"], "models": {"code": "<model>"},
-  "session_id": "…", "notes": "<anything odd about this run, else empty>",
+  "session_id": "<the harness UUID, not a session_01… share id>",
+  "notes": "<anything odd about this run, else empty>",
   "posted_pr": null, "posted_comment_id": null, "posted_at": null
 }
 ```
