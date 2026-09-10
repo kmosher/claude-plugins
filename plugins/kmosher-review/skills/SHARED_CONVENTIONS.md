@@ -62,7 +62,29 @@ Leave the buffer file in place — it lives under the session tmpdir and is swep
 
 Why a buffer: pattern propagation (convention 2) needs an inventory; severity miscalibration only pops out when you see the full list at once; structured output lets the coordinator dedupe and audit mechanically instead of regexing markdown.
 
-## 4. Report everything; filtering happens downstream
+## 4. Probe the dependency rather than reasoning about it
+
+When a finding turns on how a *third-party tool* interprets a value — flag
+parsing, matcher semantics, prefix-vs-glob rules, what an empty argument does —
+obtain the tool and ask it. Reading its source is second best and reasoning from
+its docs is third, because both answer what it should do rather than what it
+does.
+
+The cost objection is real but narrower than it looks. Standing up an
+environment is expensive; invoking one binary with three inputs is about two
+minutes and no sandbox. The line is *scope*, not run-versus-read:
+
+- **Cheap, do it:** `go install`/`pip install`/`npx` one tool and run it against
+  a throwaway fixture. Calling one function in a REPL. Running the project's own
+  test for the single case in question.
+- **Expensive, don't:** standing up the service, seeding a database, running the
+  full suite, reproducing CI.
+
+This is distinct from required upstream reading, which establishes what the
+change is talking to. This establishes what that thing actually does at the
+boundary the change depends on.
+
+## 5. Report everything; filtering happens downstream
 
 **Emit every finding you believe is real, at whatever severity it lands.** A lens has no finding cap, no severity floor, and no quota. A P3 you're sure of belongs in the buffer next to a P0.
 

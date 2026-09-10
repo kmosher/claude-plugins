@@ -69,7 +69,7 @@ Five recurring failure modes:
 4. **Speculate from naming.** A function named `stripMapOfBlocks` *sounds* right; whether the shape exists in production needs reading shim docs the code references but the reviewer skips.
 5. **Re-raise settled issues.** Without an "already-adjudicated" list, each reviewer wastes budget rediscovering decisions.
 
-## The Eight Techniques
+## The Nine Techniques
 
 Force the review through these explicitly. Output must show reasoning for each.
 
@@ -99,6 +99,24 @@ For every function call inside the change, document name, location, body behavio
 
 For each test: "Here's a buggy implementation. Would this test catch the bug?" Specifically: could it pass with the predicate flipped? Could it pass with the function doing nothing? Are fixtures realistic against the production code path?
 
+Work the full matrix, not just the diagonal. A test asserts an outcome; the
+question is whether it asserts the *reason*.
+
+|                | right reason | wrong reason |
+|---|---|---|
+| **passes** | the happy path | vacuous: green while the thing under test is broken |
+| **fails**  | the guard working | green-adjacent: fails on setup, tool install, a typo — and would keep failing if the feature were deleted |
+
+The two right-hand cells are the ones that survive review, because both look
+correct from the outside: the suite is green, or the negative test is red.
+Neither says anything about the code. A negative test that asserts only
+non-success is the common shape — it is satisfied by the build breaking.
+
+Ask it of guards too, not only tests. For anything whose job is to *reject* —
+validator, authz check, linter, policy engine, rate limiter — the dangerous
+direction is the silent accept, because a false negative is invisible while a
+false positive is loud. Enumerate what makes it accept.
+
 ### 6. Failure-mode enumeration
 
 List ≥5 concrete real-world scenarios the change does NOT fix. Be specific: name the system, configuration, user-observed outcome. Mix production failures (system X down, env var Y unset, network partition) **and adversarial-input edges** (empty/null/zero, max-value, malformed input, unicode oddities, timezone/DST, encoding boundaries, very-large/very-small numbers).
@@ -110,6 +128,50 @@ Trace two specific real-world cases end-to-end through every function in the cha
 ### 8. Negative-space audit
 
 What's absent that production code should have? Concrete absences only. Logging/telemetry, kill switch, edge-case handling documented but not enforced.
+
+### 9. Reference resolution
+
+Every name in the diff that points at something defined elsewhere: confirm the
+referent exists. A make target's prerequisites, an artifact path some other rule
+must produce, a config key read by a consumer, a metric or alarm name, a
+workflow job named in `needs:`, a file path in a `COPY` or `data` list, an env
+var something else sets.
+
+This is mechanical — grep for the referent — and it is where the review suite
+measurably loses to external reviewers (see Evidence, below). The failure has
+one shape: **a name that used to resolve and no longer does, with nothing
+erroring at the point of reference.** An alarm filtering a renamed key never
+fires and never complains. A target with no prerequisite silently keeps a stale
+binary. Nothing throws, so nothing in a per-call trace catches it.
+
+Prefer resolving to reasoning here. The check is "does `grep` find it", not
+"would this plausibly exist".
+
+## Evidence behind techniques 5 and 9
+
+Measured against the ReviewBench corpus (2026-09-09): 17 PRs where these lenses
+and an external reviewer — Copilot, Eon, or a human — both commented on the same
+diff. 148 substantive external comments, 343 lens findings in scope.
+
+**Technique 5 is a strength, and is written down to keep it.** Of external
+comments in the passes-for-the-wrong-reason class, 67% were already covered by a
+lens, against 31% coverage for every other class (Fisher exact, p = 0.003). The
+matrix generalises what the lenses were already doing well rather than patching
+a gap; the `fails for the wrong reason` cell is the one with no coverage
+evidence either way.
+
+**Technique 9 is the measured gap.** Roughly a third of everything external
+reviewers caught and the lenses did not was build, artifact and config-key
+mechanics — Makefile prerequisites, multi-arch paths, dockerignore semantics, an
+alarm filtering a key that had been renamed. Copilot in particular resolves
+these mechanically. It was nobody's technique and, per `review-releng`'s own
+scope line, nobody's lens.
+
+**Limits, so this is not over-tuned later.** N is 17 PRs and three supply a
+third of the signal. Coverage was judged from dossiers rather than diffs, biased
+toward over-counting misses. Findings were pooled across multiple runs of the
+same PR at different SHAs, which flatters the lenses. Treat the direction as
+established and the magnitudes as soft.
 
 ## Settled-Issues List
 
@@ -178,7 +240,7 @@ See `EXAMPLE.md` in this skill's directory for a real case (PR with ~10 prior re
 
 | Mistake | Fix |
 |---|---|
-| "Be adversarial" without specifying techniques | Force the eight techniques explicitly |
+| "Be adversarial" without specifying techniques | Force the nine techniques explicitly |
 | Inlining all context in the prompt | Save context files to disk; reference paths |
 | No settled-issues list | Reviewers re-raise adjudicated concerns; budget wasted |
 | Asking for N findings | Reviewer manufactures; ask for 6–15 *or* explicit "no novel" |
@@ -200,4 +262,4 @@ The full prompt template is in `PROMPT_TEMPLATE.md` in this skill's directory. C
 ## Reference
 
 - Meta's semi-formal reasoning research (2026): structured prompting requiring premises, execution traces, formal conclusions before verdict. ~93% accuracy on benchmark code-review tasks.
-- The eight techniques distill what domain experts do unconsciously: pre-load context, audit against documented conventions (CLAUDE.md), respect adjacent invariants in comments, trace calls, adversarially critique tests, enumerate failure modes (production *and* adversarial-input), ground in concrete cases, audit absences, and verify claims against evidence.
+- The nine techniques distill what domain experts do unconsciously: pre-load context, audit against documented conventions (CLAUDE.md), respect adjacent invariants in comments, trace calls, adversarially critique tests, enumerate failure modes (production *and* adversarial-input), ground in concrete cases, audit absences, resolve every reference to its definition, and verify claims against evidence.

@@ -1,11 +1,11 @@
 ---
 name: review-releng
-description: This skill should be used when reviewing a PR that touches production services or anything that could page someone — runtime services, deployment manifests, CI/release configs, auth/secrets handling, Pulumi/IaC, feature flags, runtime config, observability code, or anything on a per-request hot path. Reviews for revertability, blast radius, observability gaps, rollout safety, and performance regressions. Assumes correctness; asks whether the change can be operated.
+description: This skill should be used when reviewing a PR that touches production services or anything that could page someone — runtime services, deployment manifests, CI/release configs, auth/secrets handling, Pulumi/IaC, feature flags, runtime config, observability code, or anything on a per-request hot path. Reviews for revertability, blast radius, observability gaps, rollout safety, performance regressions, and the mechanics of the build and release path itself. Assumes the change's own logic is correct; asks whether it can be built, shipped, observed and undone.
 ---
 
 # Operational Readiness Review
 
-Review through a release-engineering lens: can this be deployed safely, observed in production, and reverted in seconds when it's wrong? Assumes correctness; asks whether it can be operated.
+Review through a release-engineering lens: can this be built, deployed safely, observed in production, and reverted in seconds when it's wrong? Assumes the change's own logic is correct; asks whether it can be operated.
 
 ## Shared conventions (read first)
 
@@ -15,7 +15,9 @@ Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md o
 
 **Use for:** any PR touching production services; schema migrations or config changes to load-bearing systems; changes to systems with SLOs/SLAs/compliance; anything that could page someone at 3am; final pre-merge gate after correctness is settled.
 
-**Don't use for:** pure CLI/library changes with no runtime deploy surface; documentation; test-only PRs; local-dev tools.
+**Also use for the build and release path itself**, wherever it lives and whatever the repo is: Makefiles, Dockerfiles and `.dockerignore`, CI workflow and action definitions, release/tagging automation, artifact paths and naming. This is claimed here deliberately. It used to fall between lenses — this one disclaimed correctness, `review-code` reads program logic — and the ReviewBench corpus shows it is the largest category external reviewers catch that we miss (see `review-code`'s Evidence section). A build rule that silently keeps a stale binary pages someone exactly like a bad deploy does.
+
+**Don't use for:** pure CLI/library changes with no runtime deploy surface *and no build-path changes*; documentation; test-only PRs; local-dev tools.
 
 If unsure: ask "if this is wrong in subtle ways, how does the org find out, and how fast can we undo it?" Weak answers → this skill applies.
 
