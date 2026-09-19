@@ -69,7 +69,7 @@ Five recurring failure modes:
 4. **Speculate from naming.** A function named `stripMapOfBlocks` *sounds* right; whether the shape exists in production needs reading shim docs the code references but the reviewer skips.
 5. **Re-raise settled issues.** Without an "already-adjudicated" list, each reviewer wastes budget rediscovering decisions.
 
-## The Nine Techniques
+## The Eleven Techniques
 
 Force the review through these explicitly. Output must show reasoning for each.
 
@@ -146,6 +146,38 @@ binary. Nothing throws, so nothing in a per-call trace catches it.
 
 Prefer resolving to reasoning here. The check is "does `grep` find it", not
 "would this plausibly exist".
+
+### 10. Run it
+
+Reasoning about code is the weakest evidence this skill produces; execution is
+the strongest, and the reviewers that beat this suite in the corpus are the
+ones that ran things. Before writing any finding of the form "X would fail
+when Y", try to make it fail: run the project's tests for the changed
+packages, run the new script against the edge input, write a throwaway
+fixture that exercises the claim. A claim you could have falsified and did not
+is reported at `confidence: low`, and says so.
+
+Where the change adds or edits tests, mutation-test them by hand: make one
+breaking edit to the code under test — invert a guard, drop a `return`,
+off-by-one a bound — and confirm the test fails. A test that survives the
+mutation is a finding (`tests`, the mutation named), and a stronger one than
+any missing-coverage remark. Two shapes recur and are worth checking first: a
+custom `TestMain` that calls `m.Run()` without `os.Exit`, so failures exit 0;
+and a vacuity guard that passes when the thing under test is empty.
+
+### 11. Prose that describes the code
+
+Comments, docstrings, READMEs, runbooks and changelog entries in the diff make
+claims about the code; check each claim against the code as it now stands,
+including code the diff did not touch. This is the largest class of finding
+external reviewers raise that this suite does not: a comment that describes
+the implementation a later commit replaced, a README step that omits the
+prerequisite the script now needs, a changelog body that names the internal
+cause instead of the user-visible effect, a header that says integrity is
+"covered by Bazel" when the recipe fetches with `curl`. A wrong claim is a
+`correctness` finding when someone will act on it (a runbook command, a
+setup step) and a `naming-or-docs` finding otherwise; either way, cite the
+line of code that contradicts it.
 
 ## Evidence behind techniques 5 and 9
 
