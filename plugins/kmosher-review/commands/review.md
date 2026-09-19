@@ -385,6 +385,15 @@ so Step 5 can attribute it. `.result.verdict` and `.result.summary` are Codex's
 own framing — record the verdict in the Step 5 summary line, and discard the
 summary rather than blending it into the report's voice.
 
+**Record what the run cost.** Codex's own tokens never reach this side — the
+companion's payload carries no usage — so the run record (Step 5.5) keeps what
+does: `payload.threadId`, which is the key into Codex's own thread history, the
+wall-clock of the `Bash` call (`date -u +%s` before and after), and the model
+and reasoning effort the CLI was configured with, read from `~/.codex/config.toml`
+(`model = …`, `model_reasoning_effort = …`) rather than assumed. Note them for
+the `codex` object in the manifest along with the exit status and the count of
+findings mapped; a skipped run records the skip reason there and nothing else.
+
 **Cost note:** this step bills to the user's ChatGPT/Codex subscription, not
 their Claude usage. It is the one step in this command whose budget the user
 manages elsewhere, so `$ARGUMENTS` containing `skip codex` or `no codex` must
@@ -624,6 +633,10 @@ that unlocks the other artifacts is the one least likely to survive.
   "lenses": ["code", "legibility"], "models": {"code": "<model>"},
   "session_id": "<the harness UUID, not a session_01… share id>",
   "notes": "<anything odd about this run, else empty>",
+  "codex": {"thread_id": "…", "model": "<from ~/.codex/config.toml>",
+            "reasoning_effort": "<from ~/.codex/config.toml, null if unset>",
+            "seconds": <wall-clock of the Step 4.4 call>, "exit_status": 0,
+            "findings": <n mapped>, "skipped": null},
   "posted_pr": null, "posted_comment_id": null, "posted_at": null
 }
 ```
@@ -638,6 +651,11 @@ Fields consumers are strict about:
 - `started_at` is Step 1's timestamp, `ended_at` the capture time. They are the
   search window downstream uses to match this run against later commits.
 - Every timestamp is ISO 8601 UTC from `date -u`, never model-derived.
+- `codex` is the only record of what Step 4.4 cost. Claude-side agents can be
+  re-costed later from their transcripts; Codex's cannot, and `thread_id` is
+  the one handle that reaches its history. When the step was skipped, write
+  `{"skipped": "<reason>"}` and nothing else; when the Codex CLI is not on
+  this machine at all, `null`.
 
 The three `posted_*` fields stay null here; Step 6 fills them if the report is
 posted. They record which PR this review was actually of — the one fact that
