@@ -36,7 +36,7 @@ Before spending Opus budget, dispatch a Sonnet subagent to check whether this PR
 is even worth reviewing. Skipping closed/draft/trivial PRs early is the cheapest
 defense against wasted dispatches.
 
-Dispatch via `Agent(subagent_type="general-purpose", description="PR eligibility check", model="sonnet", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="kmosher-review:eligibility-gate", description="PR eligibility check", prompt=...)` with a prompt covering:
 
 - **Goal**: determine whether `/review` should proceed on this PR. Return a structured verdict; the orchestrator decides what to do next.
 - **PR identifier**: `$ARGUMENTS` if it contains a PR number/URL; otherwise the current branch with `gh pr view --json title,body,number,state,isDraft,reviewDecision,comments,reviews`.
@@ -93,7 +93,7 @@ PR threads.
 Dispatch in parallel with Step 2 (classification). The orchestrator does not
 read raw PR comments; the subagent distills.
 
-Dispatch via `Agent(subagent_type="general-purpose", description="Prior PR comment mining", model="sonnet", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="kmosher-review:prior-comment-miner", description="Prior PR comment mining", prompt=...)` with a prompt covering:
 
 - **Goal**: surface adjudicated concerns and reviewer guidance from past PRs touching the files in this change. Output is passed to each lens subagent so they don't re-raise settled issues.
 - **Repo**: `<owner>/<repo>`
@@ -180,7 +180,7 @@ If the diff is purely documentation, generated, or otherwise lint-irrelevant
 (only `.md`, `.golden`, `.json` fixture changes), skip this step entirely
 and say so explicitly in the routing announcement. Otherwise:
 
-Dispatch via `Agent(subagent_type="general-purpose", description="Automated lint/diagnostic sweep", model="sonnet", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="kmosher-review:lint-sweep", description="Automated lint/diagnostic sweep", prompt=...)` with a prompt covering:
 
 - **Goal**: run mechanical lint/diagnostic checks on a PR, return structured findings only. The orchestrator will fold them into the final report alongside human-judgment findings.
 - **Repo path**: `<absolute path>`
@@ -253,19 +253,19 @@ invalidated by a lens that ran later.
 
 ### Step 4: Run each selected skill **in a subagent**
 
-For each selected skill, in order, dispatch a `general-purpose` subagent that
-loads the skill in **its own** context and returns only the structured
-findings. **Never invoke the review-* skills via the `Skill` tool directly
-from this command** — that loads the full SKILL.md plus all upstream-reading
-files into the orchestrator's context, which is exactly the cost this command
-exists to avoid.
+For each selected skill, in order, dispatch that lens's dedicated
+`kmosher-review:<lens>` subagent, which preloads the skill in **its own**
+context and returns only the structured findings. **Never invoke the
+review-* skills via the `Skill` tool directly from this command** — that
+loads the full SKILL.md plus all upstream-reading files into the
+orchestrator's context, which is exactly the cost this command exists to
+avoid.
 
 For each lens, in order:
 
-Call `Agent(subagent_type="general-purpose", description="<lens> review", model="opus", prompt=...)` with a prompt covering:
+Call `Agent(subagent_type="kmosher-review:<lens>", description="<lens> review", prompt=...)` with a prompt covering — the agent's own definition preloads the `kmosher-review:<lens>` skill body and pins the model to Opus, so the dispatch itself needs neither:
 
-- **Goal**: run the `kmosher-review:<lens>` skill on a PR and return structured findings to the orchestrator. The skill itself encodes the technique; your job is to invoke it and follow it literally.
-- **First action**: invoke `Skill(skill="kmosher-review:<lens>")` (e.g. `kmosher-review:review-code`, `kmosher-review:review-legibility`, `kmosher-review:review-compatibility`, `kmosher-review:review-releng`, `kmosher-review:review-agent-skills`). Follow the skill's instructions exactly; do not re-derive its method.
+- **Goal**: return structured findings to the orchestrator using the preloaded `kmosher-review:<lens>` skill. The skill itself encodes the technique; your job is to follow it literally.
 - **Repo path**: `<absolute path>`
 - **Owner/repo for citations**: `<owner>/<repo>` (so the subagent can build GitHub permalinks)
 - **Change**: branch `<branch>`, SHA `<sha>` (the full SHA — required for permalinks), base `<base ref>`
@@ -419,7 +419,7 @@ a low drop count as evidence the auditor was lax.
 
 Skip Step 4.5 if zero findings emerged across all lenses.
 
-Dispatch via `Agent(subagent_type="general-purpose", description="Findings auditor", model="opus", prompt=...)` with a prompt covering:
+Dispatch via `Agent(subagent_type="kmosher-review:findings-auditor", description="Findings auditor", prompt=...)` with a prompt covering:
 
 - **Goal**: audit each finding against the actual code; produce a verdict per finding. Output is folded into the final report.
 - **Repo path**: `<absolute path>`
