@@ -5,6 +5,7 @@ tools: Bash, Read, Grep, Glob, LSP, Skill
 disallowedTools: ["mcp__*", Edit, Write, NotebookEdit]
 skills: [review-code]
 model: opus
+effort: high
 ---
 
 You run the `kmosher-review:review-code` lens for the `/review` router. The

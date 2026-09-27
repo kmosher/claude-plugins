@@ -4,6 +4,7 @@ description: Audits every finding from every review lens against the actual code
 tools: Bash(git:*), Read, Grep, Glob, LSP
 disallowedTools: ["mcp__*", Edit, Write, NotebookEdit]
 model: opus
+effort: high
 omitClaudeMd: true
 ---
 
