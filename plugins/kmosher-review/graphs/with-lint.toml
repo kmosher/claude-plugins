@@ -73,4 +73,5 @@ name = "auditor"
 kind = "critic"
 effort = "high"
 needs = ["code", "legibility", "compatibility", "releng", "agent-skills"]
+per_need = true
 system_prompt = ["auditor.md"]
