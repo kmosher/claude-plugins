@@ -1,0 +1,130 @@
+#!/run/current-system/sw/bin/bash
+# A review-run mechanical node: lint the changed files with the same tools
+# lint-recipe picks at commit time, and report what they say as diagnostics.
+#
+# stdin is the mechanical contract (JSON; see docs/review-harness.md in
+# metawork), stdout is {"diagnostics": [...], "triggers": []}. Lint
+# complaints are diagnostics and exit 0; a non-zero exit means this script
+# could not do its job at all, which stops the review.
+#
+# lint-recipe answers with nothing when the repo declares its own `lint-fast`
+# target, so such a repo gets no diagnostics from this node.
+
+set -uo pipefail
+
+LINT_RECIPE="${LINT_RECIPE:-/opt/metawork/bin/lint-recipe}"
+die() { echo "changed-lint: $*" >&2; exit 2; }
+
+command -v jq >/dev/null || die "jq is not on PATH"
+[[ -x "$LINT_RECIPE" ]] || die "$LINT_RECIPE is not executable"
+contract=$(cat)
+ws=$(jq -er '.workspace' <<<"$contract") || die "stdin is not a mechanical contract"
+[[ -d "$ws" ]] || die "workspace $ws is not a directory"
+ws="${ws%/}"
+
+tmp=$(mktemp -d) || die "no temp directory"
+trap 'rm -rf "$tmp"' EXIT
+rows="$tmp/rows.tsv"
+: >"$rows"
+
+# Deleted files have nothing to lint.
+files=()
+while IFS= read -r f; do
+  [[ -f "$ws/$f" ]] && files+=("$f")
+done < <(jq -r '.changed_files[]' <<<"$contract")
+
+finish() {
+  jq -Rn '{
+    diagnostics: [inputs | split("\t") | {
+      tool: .[0],
+      file: (if .[1] == "" then null else .[1] end),
+      line: (if .[2] == "" then null else (.[2] | tonumber) end),
+      message: (.[3:] | join(" "))
+    }],
+    triggers: []
+  }' <"$rows"
+  exit 0
+}
+
+(( ${#files[@]} )) || finish
+plan=$("$LINT_RECIPE" --repo "$ws" -- "${files[@]}") || die "lint-recipe failed"
+
+# One diagnostic row: tool, file, line, message. Tabs and newlines in a
+# message would break the row, so they become spaces.
+emit() {
+  local file="${2#"$ws"/}" message="${4//[$'\t\n']/ }"
+  printf '%s\t%s\t%s\t%s\n' "$1" "${file#./}" "$3" "${message%"${message##*[! ]}"}" >>"$rows"
+}
+
+# Lines shaped `file:line[:col]: message`, which most linters can produce.
+# Prints the number of rows it wrote.
+parse_located() {
+  local tool="$1" text="$2" n=0 l
+  while IFS= read -r l; do
+    if [[ "$l" =~ ^([^:]+):([0-9]+)(:[0-9]+)?:\ (.+)$ ]]; then
+      emit "$tool" "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[4]}"
+      n=$((n + 1))
+    fi
+  done <<<"$text"
+  echo "$n"
+}
+
+export RUFF_CACHE_DIR="$tmp/ruff"
+PATH="$(dirname "$LINT_RECIPE"):$PATH"
+
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  tool=$(jq -r '.tool' <<<"$line")
+  list_only=$(jq -r '.fail_on_output' <<<"$line")
+  # An argv element can be a whole script, newlines and all, so each travels
+  # as base64.
+  argv=()
+  while IFS= read -r a; do
+    argv+=("$(base64 -d <<<"$a")")
+  done < <(jq -r '.argv[] | @base64' <<<"$line")
+  (( ${#argv[@]} )) || continue
+
+  # Ask for the output shape that carries a line number.
+  case "$tool" in
+    shellcheck) argv=("${argv[0]}" -f gcc "${argv[@]:1}") ;;
+    ruff) argv=("${argv[@]:0:2}" --output-format=concise "${argv[@]:2}") ;;
+    eslint) argv+=(--format json) ;;
+  esac
+
+  out=$(cd "$ws" && "${argv[@]}" 2>"$tmp/err")
+  rc=$?
+  err=$(<"$tmp/err")
+  seen=0
+
+  if [[ "$list_only" == "true" ]]; then
+    # gofmt -l and its kind print the paths that would change and exit 0.
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      emit "$tool" "$f" "" "would be reformatted"
+      seen=$((seen + 1))
+    done <<<"$out"
+    # A file it could not parse is reported on stderr instead.
+    seen=$((seen + $(parse_located "$tool" "$err")))
+  elif [[ "$tool" == "eslint" ]] && jq -e . >/dev/null 2>&1 <<<"$out"; then
+    jq -r '.[] | .filePath as $f | .messages[] | [$f, (.line // ""), ((.message) + (if .ruleId then " (" + .ruleId + ")" else "" end))] | @tsv' <<<"$out" |
+      while IFS=$'\t' read -r f l m; do emit "$tool" "$f" "$l" "$m"; done
+    seen=$(jq '[.[].messages[]] | length' <<<"$out")
+  elif [[ "$tool" == "rustfmt" ]]; then
+    while IFS= read -r l; do
+      if [[ "$l" =~ ^Diff\ in\ (.+)(:|\ at\ line\ )([0-9]+):?$ ]]; then
+        emit "$tool" "${BASH_REMATCH[1]}" "${BASH_REMATCH[3]}" "would be reformatted"
+        seen=$((seen + 1))
+      fi
+    done <<<"$out"
+  else
+    seen=$(parse_located "$tool" "$out"$'\n'"$err")
+  fi
+
+  # Output no parser could place, from a tool that said it failed, still
+  # reaches the reader, unlocated.
+  if (( seen == 0 && rc != 0 )); then
+    emit "$tool" "" "" "exited $rc: $(head -c 300 <<<"${err:-$out}")"
+  fi
+done <<<"$plan"
+
+finish

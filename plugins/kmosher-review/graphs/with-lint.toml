@@ -33,6 +33,13 @@ agent-skills = { touches = [
 ] }
 
 [[node]]
+name = "lint"
+kind = "mechanical"
+provider = "command"
+command = ["mechanical/changed-lint"]
+timeout = 600
+
+[[node]]
 name = "code"
 kind = "generator"
 effort = "high"
