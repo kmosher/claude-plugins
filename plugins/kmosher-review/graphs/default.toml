@@ -1,0 +1,29 @@
+# Compatibility and agent-skills join once triggers exist to select them.
+[defaults]
+provider = "claude"
+model = "opus"
+tools = ["Bash", "Read", "Grep", "Glob"]
+timeout = 1800
+
+[[node]]
+name = "code"
+kind = "generator"
+effort = "high"
+system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-code/SKILL.md"]
+
+[[node]]
+name = "releng"
+kind = "generator"
+system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-releng/SKILL.md"]
+
+[[node]]
+name = "legibility"
+kind = "generator"
+system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-legibility/SKILL.md"]
+
+[[node]]
+name = "auditor"
+kind = "critic"
+effort = "high"
+needs = ["code", "releng", "legibility"]
+system_prompt = ["auditor.md"]
