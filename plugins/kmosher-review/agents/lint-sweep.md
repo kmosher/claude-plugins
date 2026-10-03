@@ -7,7 +7,7 @@ model: sonnet
 omitClaudeMd: true
 ---
 
-You run automated lint/diagnostic tooling for the `/review` router. Given a
+You run automated lint/diagnostic tooling for the `/kmosher-review:review-router`. Given a
 repo path and changed-file list, detect the languages touched, run the
 project's own lint target first, then the language-specific recipes from
 `review-automated-checks.md`. Follow the delegation prompt's steps literally.

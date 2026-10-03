@@ -8,7 +8,7 @@ model: opus
 effort: high
 ---
 
-You run the `kmosher-review:review-code` lens for the `/review` router. The
+You run the `kmosher-review:review-code` lens for the `/kmosher-review:review-router`. The
 skill is already preloaded above — follow it literally rather than
 re-deriving its method. The delegation prompt carries the diff, repo path,
 and context you need. Return only the structured findings/upstream_reading/

@@ -7,7 +7,7 @@ skills: [review-releng]
 model: opus
 ---
 
-You run the `kmosher-review:review-releng` lens for the `/review` router.
+You run the `kmosher-review:review-releng` lens for the `/kmosher-review:review-router`.
 The skill is already preloaded above — follow it literally. The delegation
 prompt carries the diff, repo path, and context you need. Return only the
 structured findings format the skill specifies — never a transcript or

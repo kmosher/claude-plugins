@@ -1,0 +1,728 @@
+---
+allowed-tools: Bash(git:*), Bash(gh:*), Bash(grep:*), Bash(rg:*), Bash(ls:*), Bash(find:*), Bash(wc:*), Bash(cat:*), Bash(head:*), Bash(tail:*), Bash(sort:*), Bash(node:*), Bash(date:*), Bash(shasum:*), Bash(sha256sum:*), Read, Write, Glob, Grep, Skill, Agent
+description: The previous model-run review router, kept as a fallback for machines without `review-run` and for the steps the harness lacks (prior-PR comment mining, codex cross-model pass, lint sweep). `/review` now runs the harness.
+disable-model-invocation: false
+---
+
+You are routing a code review across the available `kmo` review skills:
+
+- **`review-code`** — bug-finding via per-call trace, adversarial test critique, failure-mode enumeration, concrete walkthroughs, schema/shape semantics, negative-space audit. Always runs.
+- **`review-legibility`** — readability via 11 concrete heuristic tests (one-sentence purpose, comment deletion, branch fanout, name genericization, reader onramp, reference staleness, iteration-history scars, comment-to-code distance, duplication, tests-as-documentation, comment density). Always runs after review-code.
+- **`review-compatibility`** — compat across deploy / caller boundaries: data shape (DDL, message formats, stored state) AND interface (exported signatures, public APIs, config keys, env vars, CLI flags, behavior semantics). Optional: use when the change crosses any of those boundaries.
+- **`review-releng`** — operational readiness via revertability/blast-radius/observability/rollout checklist + deployment patterns + anti-patterns. Optional: use for changes touching production services, deploy infra, or anything that could page someone.
+- **`review-agent-skills`** — skill-authoring quality for Claude Code skills, slash commands, and plugin manifests: frontmatter schema, description-as-trigger, body voice, supporting-file references, side-effect safety, rename consistency. Optional: use when the diff touches `**/skills/<name>/`, `**/commands/<name>.md`, `**/agents/<name>.md`, or `.claude-plugin/*.json`.
+- **`codex`** — not a skill: a second opinion from a non-Claude model, via OpenAI's `codex` CLI. Every lens above shares one model's blind spots, and an auditor drawn from that same model cannot see past them. Runs whenever the CLI is present and authenticated — see Step 4.4.
+
+## What this command does
+
+Given a PR or branch (default: the current branch), this command:
+
+0. **Eligibility check** — cheap Sonnet gate that skips closed/draft/trivial/already-reviewed PRs before spending any Opus budget.
+1. **Identifies the change** — gather the diff, the files touched, and the PR description (if any).
+1.5. **Prior-PR-comment mining** — surface adjudicated concerns and prior reviewer guidance from past PRs that touched these files (parallel subagent).
+2. **Classifies the change** to decide which review lenses apply.
+3. **Runs automated lint/diagnostic tooling** appropriate to the languages in the diff (Go, TypeScript, Rust, …) — see Step 2.5 and the sibling file `review-automated-checks.md`.
+4. **Runs the relevant skills in the right order**, each in an isolated subagent that invokes the lens skill in its own context.
+4.4. **Cross-model pass** — shells out to OpenAI's `codex` for an independent review of the same diff, mapped into the canonical finding schema.
+4.5. **Auditor pass** — an Opus subagent re-checks each finding against the actual code, separating claims that don't hold from claims that do, and recalibrating severity.
+5. **Aggregates findings** across automated tools, skill lenses, and the auditor; deduplicates; produces a single prioritized report with GitHub permalink citations.
+6. **Offers to post the report as a PR comment** (skipped if `$ARGUMENTS` includes `local`, no PR exists, or no findings survived).
+
+## Step-by-step
+
+### Step 0: Eligibility gate
+
+Before spending Opus budget, dispatch a Sonnet subagent to check whether this PR
+is even worth reviewing. Skipping closed/draft/trivial PRs early is the cheapest
+defense against wasted dispatches.
+
+Dispatch via `Agent(subagent_type="kmosher-review:eligibility-gate", description="PR eligibility check", prompt=...)` with a prompt covering:
+
+- **Goal**: determine whether `/review` should proceed on this PR. Return a structured verdict; the orchestrator decides what to do next.
+- **PR identifier**: `$ARGUMENTS` if it contains a PR number/URL; otherwise the current branch with `gh pr view --json title,body,number,state,isDraft,reviewDecision,comments,reviews`.
+- **Repo**: `<owner>/<repo>` (derive from `gh repo view --json nameWithOwner` if needed).
+- **Steps** (the subagent does these — orchestrator does not run them inline):
+  1. Run `gh pr view <id> --json state,isDraft,mergeable,additions,deletions,changedFiles,comments,reviews,author`. If no PR exists for the branch, return `proceed` with a note "no PR yet, reviewing branch directly."
+  2. Skip if `state == "CLOSED"` or `state == "MERGED"`. Note: drafts proceed by default — many users intentionally run `/review` on drafts before marking ready. Only skip a draft if `$ARGUMENTS` includes `skip-draft`.
+  3. Skip if total `additions + deletions < 20` AND all changed files are docs (`.md`), generated, fixtures (`.golden`, `.snap`), or tests-only without source changes.
+  4. Skip if the PR already has a top-level review comment from the current `gh auth status` user that starts with `# Review summary` (the marker this command's Step 5 emits) AND no new commits have landed since that review. Cross-check `pr view --json reviews,commits` — compare timestamps.
+  5. Otherwise: proceed.
+- **Output format** (only this, no transcript):
+  ```
+  verdict: proceed | skip
+  reason: <one short sentence>
+  pr_state: <OPEN|CLOSED|MERGED|n/a>
+  is_draft: <true|false|n/a>
+  size: <additions + deletions, or "n/a">
+  prior_review: <none | "<sha of last review's head commit>" | n/a>
+  ```
+
+If verdict is `skip`, report the reason to the user and stop. Do not proceed
+to Step 1. If `$ARGUMENTS` contains the override phrase `force`, ignore the
+skip verdict and proceed anyway.
+
+### Step 1: Identify the change
+
+Run these in parallel:
+
+- `git rev-parse HEAD` — current commit SHA
+- `git merge-base origin/main HEAD` — full base SHA (fall back to `origin/master`)
+- `date -u +%Y-%m-%dT%H:%M:%SZ` — review start time, for Step 5.5's `started_at`
+- `git rev-parse --abbrev-ref HEAD` — current branch
+- `git log --oneline origin/main..HEAD` — commits in the change (fall back to `origin/master` if `origin/main` doesn't exist)
+- `git diff --stat origin/main..HEAD` — files touched + line counts
+- `git diff --name-only origin/main..HEAD` — files-changed list
+- `gh pr view --json title,body,number,state` (best effort; OK if no PR exists yet)
+
+If the user provided a specific PR number or branch name as `$ARGUMENTS`, use that instead of the current branch.
+
+Also check for a repo-local review overlay:
+
+- `test -f REVIEW.md && cat REVIEW.md` — if present, this is the authoritative overlay for what to flag, severity calibration, codebase precedents to treat as true, and output shape. Its rules **override the defaults baked into the lens skills.**
+- If `REVIEW.md` is absent, skip silently. Falling back to skill defaults is the expected path for most repos.
+
+Cache the contents (or absence) in a variable; you'll pass it into every lens subagent in Step 4.
+
+### Step 1.5: Prior-PR-comment mining (parallel subagent)
+
+Past PRs on the same files often contain adjudicated concerns ("we decided X
+because Y"), pattern guidance, or reviewer comments that still apply. Mining
+this is free signal that no skill body can encode — team knowledge lives in
+PR threads.
+
+Dispatch in parallel with Step 2 (classification). The orchestrator does not
+read raw PR comments; the subagent distills.
+
+Dispatch via `Agent(subagent_type="kmosher-review:prior-comment-miner", description="Prior PR comment mining", prompt=...)` with a prompt covering:
+
+- **Goal**: surface adjudicated concerns and reviewer guidance from past PRs touching the files in this change. Output is passed to each lens subagent so they don't re-raise settled issues.
+- **Repo**: `<owner>/<repo>`
+- **Changed files**: `<file list from Step 1>`
+- **Steps**:
+  1. For each changed file (cap at 10 files; pick the largest by line count if more), run `gh search prs --repo <owner>/<repo> --state merged --json number,title,url -- <file>` to find recent merged PRs touching it. Cap at 5 PRs per file.
+  2. For each candidate PR, fetch comments via `gh pr view <num> --json comments,reviews,reviewRequests` (limit to top-level review summaries and inline comments on the relevant file).
+  3. Distill into **applicable prior guidance**: a concern, decision, or pattern the current PR might re-raise. Skip PR-specific noise (release notes, nit fixes, bot comments).
+  4. Distill into **settled-issues**: concerns explicitly adjudicated ("we decided not to do X because Y"). These should NOT be raised again by the review lenses.
+- **Output format** (only this):
+  ```
+  ## Applicable prior guidance
+  <numbered list. Each: source PR # + URL, file affected, one-sentence guidance, why it might apply here>
+
+  ## Settled issues — DO NOT re-raise
+  <numbered list. Each: source PR # + URL, the concern, the adjudication reason>
+
+  ## Coverage
+  Files mined: <list>
+  PRs scanned: <count>
+  Files skipped: <list with reason — e.g. "new file, no prior PRs">
+  ```
+- **Do not** quote large comment blocks. Distill to one sentence per item. If a file has no prior PRs, say so and move on.
+
+The orchestrator passes both lists into each Step 4 lens subagent's prompt
+under "Prior PR context."
+
+### Step 2: Classify the change
+
+`review-code` and `review-legibility` always run. Use this decision tree to decide whether to add the optional lenses.
+
+**Compatibility category** — add `review-compatibility` if any of:
+- *Data-shape signals*: DDL files (`*.sql`, files matching `migrations/*`, `schema/*.go`); protobuf or Avro definitions (`*.proto`, `*.avsc`); files defining message formats (queue payloads, API request/response shapes); changes to serialized-state types (cache keys, stored objects); cross-system data flow (DB-to-DB migrations, dual-writes).
+- *Interface signals*: changes to exported / `pub` function signatures; REST/gRPC handler bodies or routes; CLI flag definitions; config-key / env-var reads (Viper, `os.Getenv`, `process.env`, similar); default-value changes in public types; CHANGELOG / API-version-bump files; SDK / client-library code.
+
+**Service/deploy category** — add `review-releng` if any of:
+- Files in `pkg/server/`, `cmd/server/`, `services/`, `api/`, anything that's a runtime service
+- IaC stack configs / deployment manifests (`*.yaml` or `*.ts` under `deploy/`, `k8s/`, `helm/`, `pulumi/`, `terraform/`, `cdk/`)
+- CI / release configs (`.github/workflows/`, `Dockerfile`, `Procfile`)
+- Anything that changes runtime behavior of a deployed system
+- Files that touch authentication, authorization, secrets, credential handling
+
+**Agent-skill category** — add `review-agent-skills` if any of:
+- `**/skills/<name>/SKILL.md` added, modified, or deleted
+- `**/skills/<name>/{references,scripts,examples}/**` changes (supporting files for a skill)
+- `**/commands/<name>.md` (slash-command definitions follow the same frontmatter conventions)
+- `**/agents/<name>.md` (agent definitions follow similar conventions)
+- `**/.claude-plugin/plugin.json` or `**/.claude-plugin/marketplace.json`
+- A directory rename under `skills/` — even with no file content changes, the lens checks rename consistency
+
+**If everything is small and trivial** (< 20 lines changed, no new functions, doc/test only) — say so and recommend skipping the review suite.
+
+**Security-touching changes — recommend `/security-review`.** This command's lenses don't have a dedicated security pass; security review is a separate Claude Code skill (`/security-review`, built-in). If the diff touches any of the following, mention `/security-review` in the routing announcement and suggest running it alongside `/review`:
+
+- Auth / authz / session / token / cookie / credential handling
+- New endpoints exposed to external callers
+- Input parsing / deserialization of untrusted data
+- Anything that calls out to external services with user-supplied data
+- SQL/NoSQL query construction (especially string-built queries)
+- Path / file-system operations with user-supplied paths
+- Command execution (`exec`, `subprocess`, shell out)
+- Template rendering with user-supplied data
+- Cryptography (key handling, signing, encryption)
+- Logging that may include user-supplied input (log injection risk)
+- Secrets / API keys / config containing credentials
+
+Do **not** silently fold security into the review-code lens — it's its own discipline with its own threat-model framing. The router's job is to call attention to it; the user decides whether to invoke `/security-review`.
+
+### Step 2.5: Run automated lint/diagnostic tooling (before the human-judgment skills)
+
+Before invoking the review skills, run the project's own lint targets and
+language-specific diagnostic tools on the change. These catch mechanical issues
+(unused code, modernize hints, type errors, fmt drift) that the review skills
+shouldn't waste judgment on, and surface findings the IDE may not show on files
+outside the open editor pane.
+
+**Dispatch this to a subagent — do not run lint inline.** Raw lint output can
+be thousands of lines; running it in the orchestrator context burns the
+budget you need for aggregation. The recipes live in
+`review-automated-checks.md` (sibling of this file); the subagent reads it
+on demand per language.
+
+If the diff is purely documentation, generated, or otherwise lint-irrelevant
+(only `.md`, `.golden`, `.json` fixture changes), skip this step entirely
+and say so explicitly in the routing announcement. Otherwise:
+
+Dispatch via `Agent(subagent_type="kmosher-review:lint-sweep", description="Automated lint/diagnostic sweep", prompt=...)` with a prompt covering:
+
+- **Goal**: run mechanical lint/diagnostic checks on a PR, return structured findings only. The orchestrator will fold them into the final report alongside human-judgment findings.
+- **Repo path**: `<absolute path>`
+- **Change**: branch `<branch>`, SHA `<sha>`, base `<base ref>`
+- **Changed files**: `<list>` (so the subagent knows the scope)
+- **Recipe file**: read **only the language-relevant subsection** of `<absolute path to review-automated-checks.md>`. Do not load the whole file unless multiple languages are touched.
+- **Steps**:
+  1. Detect languages in the diff by extension (`.go` → Go, `.ts/.tsx/.js/.jsx` → TypeScript, `.rs` → Rust). For anything else, check `Makefile`/`package.json` `scripts` for a project-level lint target and run it if present.
+  2. Run the project's own lint target first (`make lint`, `npm run lint`, `cargo clippy`, etc.) — the project config is authoritative; the recipes are a floor.
+  3. Run the language-specific diagnostic tools per the recipe (Go: `mcp__gopls__go_diagnostics` for changed files, `modernize` for package sweeps; TypeScript: ESLint + `tsc --noEmit`; Rust: `clippy`, `check`, `fmt`).
+- **Output format** (the subagent must return only this, no transcript):
+  ```
+  ## Automated findings
+  <numbered list. Each: severity (P0–P3 by author judgment), source `automated/<tool>` tag, file:line, what the tool said, suggested fix or "see tool output">
+
+  ## Tools run
+  <one line each: tool name, exit status, finding count>
+
+  ## Tools skipped
+  <one line each: tool name, reason — e.g. "no Go files", "make lint target not present">
+  ```
+- **Do not** dump raw lint output. Summarize. If a single tool produced >50 findings, group them and report counts per category rather than listing each.
+
+### Model policy
+
+**Every judgment step runs on Opus.** That means all five lenses (Step 4) and
+the auditor (Step 4.5) — the steps whose output is a claim about whether code is
+wrong. Reviewing is the task this suite exists to do well, and it is precisely
+the task where a cheaper model's misses are invisible: a lens that fails to
+notice a bug returns the same clean-looking JSONL as a lens that correctly found
+nothing.
+
+Step 4.4 is outside this policy — it is deliberately not a Claude model, which
+is the only reason it can see what Opus cannot. Its model is whatever the user's
+`codex` CLI is configured to use; do not pass `--model` to override it.
+
+Sonnet is the floor, used only for the steps that gather rather than judge:
+the eligibility gate (Step 0), prior-PR mining (Step 1.5), and the lint sweep
+(Step 2.5). Each of those transcribes or summarizes something already
+determined elsewhere — a PR's state, a comment thread's conclusion, a linter's
+exit code — so a weaker model's failures show up as obviously missing data
+rather than as false confidence. Do not push a lens or the auditor down to
+Sonnet to save budget; drop a lens from the run instead, and say which one.
+
+### Step 3: Sequencing
+
+Run lenses in this order. Earlier lenses can invalidate later findings, so don't parallelize:
+
+1. **`review-code`** — always. Bugs make other findings moot.
+2. **`review-compatibility`** — if selected. Compat issues are deploy-blockers.
+3. **`review-releng`** — if selected. Operational concerns assume data layer is settled.
+4. **`review-agent-skills`** — if selected. Skill-authoring rules are routing-correctness, not bugs; run after correctness/compat are settled so findings don't get re-classified.
+5. **`review-legibility`** — always, last. Polish after correctness and ops are settled.
+
+Print which lenses you'll run before invoking them, in the form:
+
+```
+Routing this change through:
+  1. review-code (always)
+  2. review-compatibility (DDL + exported-signature changes detected)
+  3. review-releng (touches production service)
+  4. review-agent-skills (touches plugins/foo/skills/bar/SKILL.md)
+  5. review-legibility (always)
+  + codex cross-model pass (Step 4.4)
+```
+
+The codex pass is not part of this ordering — it reviews the same diff
+independently and runs after the lenses finish, so nothing it reports can be
+invalidated by a lens that ran later.
+
+### Step 4: Run each selected skill **in a subagent**
+
+For each selected skill, in order, dispatch that lens's dedicated
+`kmosher-review:<lens>` subagent, which preloads the skill in **its own**
+context and returns only the structured findings. **Never invoke the
+review-* skills via the `Skill` tool directly from this command** — that
+loads the full SKILL.md plus all upstream-reading files into the
+orchestrator's context, which is exactly the cost this command exists to
+avoid.
+
+For each lens, in order:
+
+Call `Agent(subagent_type="kmosher-review:<lens>", description="<lens> review", prompt=...)` with a prompt covering — the agent's own definition preloads the `kmosher-review:<lens>` skill body and pins the model to Opus, so the dispatch itself needs neither:
+
+- **Goal**: return structured findings to the orchestrator using the preloaded `kmosher-review:<lens>` skill. The skill itself encodes the technique; your job is to follow it literally.
+- **Repo path**: `<absolute path>`
+- **Owner/repo for citations**: `<owner>/<repo>` (so the subagent can build GitHub permalinks)
+- **Change**: branch `<branch>`, SHA `<sha>` (the full SHA — required for permalinks), base `<base ref>`
+- **Diff**: paste the full unified diff (or, if huge, the file list + per-file hunk ranges and instructions to read full files from disk). The subagent will read further files itself.
+- **PR description** (if any): paste verbatim.
+- **Settled-issues list** (if the user provided one as `$ARGUMENTS`): paste verbatim, mark as DO NOT raise.
+- **Deferred comment judgment** — for `review-legibility` only, and only when `$ARGUMENTS` includes `defer-comment-judgment`: tell the subagent that comment judgment is deferred to a dedicated comment pass running after this review, so the lens's "Deferred comment judgment" rule applies. Never pass this to another lens; no other lens has the rule.
+- **Repo-local `REVIEW.md`** (from Step 1, if present): paste the file's contents verbatim under a clearly labeled heading. Instruct the subagent that `REVIEW.md` rules **override** the skill's defaults — severity calibration, what to flag, what to skip, output shape. If `REVIEW.md` declares codebase precedents (e.g. "trusted env vars", "no XSS in React unless `dangerouslySetInnerHTML`"), the subagent must NOT flag findings predicated on violating those precedents.
+- **Prior PR context** (from Step 1.5): paste both the "Applicable prior guidance" and "Settled issues — DO NOT re-raise" lists. The subagent treats the latter as additional settled issues.
+- **Automated findings from Step 2.5** (if run): paste them so the subagent doesn't re-surface mechanical issues. The subagent may cross-reference but should not duplicate.
+- **Build the "required upstream reading" list yourself.** The skill calls for 3–6 upstream files; do NOT expect the orchestrator to enumerate them. As the subagent, you derive the list from the diff by: (a) `grep` for imports in each changed file and pull the most-referenced module's interface/shim file; (b) `find` root + directory-level `CLAUDE.md` files for every directory in the changed-file list; (c) extract any PR/issue references from diff comments or commit messages; (d) the PR description's own "related issues" or "see also" links. Cap at 6 files total. Skip auto-generated files (`*.pb.go`, `*_gen.go`, lockfiles, etc.) as candidates.
+- **Permalink field — mandatory on every finding**: every finding must include a `permalink` field (in addition to `file` and `line` from the canonical schema). Build as `https://github.com/<owner>/<repo>/blob/<full-sha>/<path>#L<start>-L<end>`. The range must include **at least 1 line of context above and below** the cited code (e.g. flagging line 42 → `L41-L43`; range 100–105 → `L99-L106`). Markdown won't render the preview correctly without the full SHA, so use the SHA from this step's input — do not invoke `git rev-parse` inside the citation string.
+- **Output format** — the subagent must return only this, structured for mechanical consumption:
+
+  ````
+  ## findings
+
+  ```jsonl
+  {"file": "...", "line": ..., "permalink": "...", "severity": "...", "confidence": "...", "category": "...", "description": "...", "why_it_matters": "...", "recommendation": "...", <lens-specific fields>}
+  {"file": "...", "line": ..., ...}
+  ```
+
+  ## upstream_reading
+
+  ```jsonl
+  {"path": "<path>", "told_me": "<one-line summary>"}
+  {"path": "<path>", "told_me": "<one-line summary>"}
+  ```
+
+  ## meta
+
+  <one paragraph, free-form. Note anything the orchestrator should know: "diff is mostly generated code, applied skill only to handwritten files"; "REVIEW.md declared 3 codebase precedents; flagged none of them"; "no novel findings, what I checked was X/Y/Z".>
+  ````
+
+  The `findings` JSONL block follows the canonical finding schema from `SHARED_CONVENTIONS.md` §3 plus any lens-specific fields documented in the lens's Output Format section. Report every finding you believe is real, at whatever severity — the auditor in Step 4.5 does the filtering, and it sees all lenses at once. If genuinely nothing surfaced, emit an empty `jsonl` code block and explain in `meta`.
+
+- **Do not** return a transcript, file dumps, narration, or any markdown rendering of findings. The orchestrator renders. The subagent emits raw structured data.
+
+After each subagent returns:
+
+- If any P0 findings emerged, **stop and report to the user before running the next lens**. P0s should be fixed before further review.
+- If only P1/P2/P3 emerged, continue to the next lens. The user can address them in batch.
+- The orchestrator's context now contains only the structured findings text (a few KB per lens), not the file reads or the skill body — that's the whole point of this step.
+
+### Step 4.4: Cross-model pass (codex)
+
+Everything upstream of here is one model reviewing code, and Step 4.5 is that
+same model checking its own work. This step is the only one that can catch a bug
+the whole Claude-side pipeline is constitutionally unable to see. Its findings
+are not privileged — they go through the auditor exactly like a lens's do — but
+they originate outside the family.
+
+This is a `Bash` shell-out, not a subagent: `codex` is its own agent with its own
+context, so wrapping it in one would only add a translation layer.
+
+**Locate the companion script.** `openai/codex-plugin-cc` ships it; the router
+cannot use `/codex:review` directly because that command sets
+`disable-model-invocation: true`, and `CLAUDE_PLUGIN_ROOT` is only defined inside
+that plugin's own commands. Glob for it and take the highest version:
+
+```bash
+ls -d ~/.claude/plugins/cache/openai-codex/codex/*/scripts/codex-companion.mjs 2>/dev/null | sort -V | tail -1
+```
+
+If the glob is empty, skip this step and record the reason as
+"codex-plugin-cc not installed". Do not fall back to bare `codex review` — its
+output is prose with no schema, and mapping it is guesswork.
+
+**Run the adversarial subcommand, not `review`.** They differ in output, not just
+tone: `review` returns Codex's own prose in `.codex.stdout`, while
+`adversarial-review` constrains the model to the plugin's
+`schemas/review-output.schema.json` and returns validated JSON at `.result`.
+Only the latter is mechanically consumable.
+
+```bash
+node <companion> adversarial-review --wait --json --base <base ref> --cwd <repo path>
+```
+
+Pass the change scope the same way the lenses got it — `--base origin/master`
+for a branch review. Add focus text as a trailing positional argument only if
+`$ARGUMENTS` carried a lens override worth forwarding; otherwise let Codex pick
+its own angle, which is the point of asking a different model.
+
+A full review takes minutes on a real diff — give the `Bash` call a timeout in
+the 5–10 minute range rather than letting the default kill a run that was working.
+
+**Failures here must be named, not absorbed.** A zero-finding return from a broken
+run looks exactly like a clean review, so treat this step as skipped-with-reason
+on *any* non-zero exit, quoting the last stderr line. Three causes are common
+enough to recognize:
+
+- `failed to initialize sqlite state runtime under ~/.codex` — Codex needs to
+  write its state DB, and the run dies without it. Under a Claude Code sandbox
+  that denies `~/.codex`, this fires every time, so it is the expected failure
+  rather than an unlucky one.
+- Auth errors — `codex login` was never run, or the stored ChatGPT token expired.
+  `codex doctor` reports auth state; suggest it in the skip reason rather than
+  attempting a login from inside a review.
+- `.parseError` non-null on a zero exit — the model returned something that failed
+  schema validation. Report the parse error and do not try to salvage findings
+  from `.rawOutput`.
+
+**Map `.result.findings[]` into the canonical schema.** The plugin's shape is not
+`SHARED_CONVENTIONS.md` §3; translate each finding:
+
+| Codex field | Canonical field | Mapping |
+|---|---|---|
+| `severity` | `severity` | `critical`→P0, `high`→P1, `medium`→P2, `low`→P3 |
+| `confidence` (0.0–1.0) | `confidence` | `<0.5` low, `0.5–0.8` medium, `>0.8` high |
+| `title` + `body` | `description` | title as the claim, body as the detail |
+| `recommendation` | `recommendation` | verbatim |
+| `file`, `line_start` | `file`, `line` | strip any absolute prefix to repo-relative |
+| `line_start`/`line_end` | `permalink` | same `≥1 line of context` rule as Step 4 |
+
+Set `category` to what the finding is about, and tag every one with lens `codex`
+so Step 5 can attribute it. `.result.verdict` and `.result.summary` are Codex's
+own framing — record the verdict in the Step 5 summary line, and discard the
+summary rather than blending it into the report's voice.
+
+**Record what the run cost.** Codex's own tokens never reach this side — the
+companion's payload carries no usage — so the run record (Step 5.5) keeps what
+does: `payload.threadId`, which is the key into Codex's own thread history, the
+wall-clock of the `Bash` call (`date -u +%s` before and after), and the model
+and reasoning effort the CLI was configured with, read from `~/.codex/config.toml`
+(`model = …`, `model_reasoning_effort = …`) rather than assumed. Note them for
+the `codex` object in the manifest along with the exit status and the count of
+findings mapped; a skipped run records the skip reason there and nothing else.
+
+**Cost note:** this step bills to the user's ChatGPT/Codex subscription, not
+their Claude usage. It is the one step in this command whose budget the user
+manages elsewhere, so `$ARGUMENTS` containing `skip codex` or `no codex` must
+suppress it.
+
+### Step 4.5: Auditor pass
+
+The lenses report everything they believe is real and do no filtering of their
+own (`SHARED_CONVENTIONS.md` §4). This is the pass that establishes which of
+those claims hold. It exists as a separate step, on a separate agent, precisely
+because a reviewer auditing its own findings grades its own work — this agent
+never saw the finding get written and has no stake in it surviving.
+
+It sorts findings into three outcomes:
+
+- **Doesn't hold** — the cited code doesn't say what the finding claims. This is the only outcome that removes a finding from the report.
+- **Holds, but already decided** — real, but pre-existing, by-design elsewhere in the codebase, or explicitly adjudicated in the settled-issues list. Still reported, in its own section, because "we already decided this" is information the reader may want to revisit.
+- **Holds** — reported, at whatever severity the rubric lands on.
+
+**The auditor's job is truth, not volume.** It has no quota to cut and no target
+list length. A pass where every finding holds is a correct result. Do not treat
+a low drop count as evidence the auditor was lax.
+
+Skip Step 4.5 if zero findings emerged across all lenses.
+
+Dispatch via `Agent(subagent_type="kmosher-review:findings-auditor", description="Findings auditor", prompt=...)` with a prompt covering:
+
+- **Goal**: audit each finding against the actual code; produce a verdict per finding. Output is folded into the final report.
+- **Repo path**: `<absolute path>`
+- **Owner/repo, full SHA**: pass through from Step 1.
+- **Findings to verify**: the concatenated JSONL `findings` blocks from every lens in Step 4, plus the mapped Codex findings from Step 4.4. Assign each finding a stable global index (`<lens>:<n>`, e.g. `code:0`, `legibility:3`, `codex:1`).
+- **Do not discount a finding for coming from Step 4.4.** The auditor's test is whether the cited code supports the claim, and a cross-model finding that survives that test is worth more than a same-model one, not less — it is evidence the Claude-side lenses missed something. "No Claude lens raised this" is not a reason to mark it `false-positive`.
+- **Settled issues + prior guidance**: pass through from Step 1.5. The auditor uses these to mark findings that re-raise adjudicated concerns.
+- **For each finding, the auditor does**:
+  1. `Read` the file + cited `line` (with a few lines of context). Confirm the cited code matches the `description`.
+  2. If the finding cites behavior elsewhere in the codebase, `Grep` for the same pattern. If the pattern is widespread and consistent, flag the finding as "pattern is by-design, not a regression."
+  3. Check whether the cited lines are actually changed in this PR or pre-existing (`git blame` the file at the SHA; if the commit isn't in the PR's commit range, it's pre-existing).
+  4. Re-score severity per the strict rubric below.
+  5. Cross-check against the "Settled issues — DO NOT re-raise" list; if a finding matches a settled issue, mark it as `settled` regardless of severity.
+- **Strict severity rubric** (use this verbatim, do not invent intermediate levels):
+  - **P0** — compilation failure, data corruption, exploitable security hole, guaranteed crash, schema migration that will fail at scale.
+  - **P1** — logic error that WILL trigger under realistic production conditions; resource leak; real concurrency bug; revertability gap that becomes unfixable post-merge.
+  - **P2** — edge case that COULD trigger; missing error handling; compatibility risk in a non-hot path; observability gap.
+  - **P3** — code quality, minor concern, test-strength issue, legibility friction.
+
+  There is no severity below P3 that means "not worth mentioning." A real
+  finding you'd score beneath P3 is a P3.
+
+- **Verdicts** — assign exactly one per finding:
+  - `false-positive` — the cited code does not support the claim. **The only verdict that removes a finding from the report.** Use it when the finding is wrong, never when it is merely small.
+  - `settled` — the claim holds, but the settled-issues list adjudicated it. Reported in its own section, not dropped.
+  - `pre-existing` — the claim holds, but the cited lines predate this PR, or the pattern is consistent and by-design across the codebase. Reported in its own section, not dropped.
+  - `downgraded` / `upgraded` — the claim holds at a different severity than the lens assigned. Include `from` and `to`. Severity moves in both directions; if a lens under-called something, raise it.
+  - `kept` — the claim holds at the severity the lens assigned.
+- **Output format** (only this, no transcript):
+
+  ````
+  ## verdicts
+
+  ```jsonl
+  {"index": "code:0", "verdict": "kept", "reason": "..."}
+  {"index": "code:1", "verdict": "downgraded", "from": "P1", "to": "P2", "reason": "..."}
+  {"index": "code:4", "verdict": "upgraded", "from": "P2", "to": "P1", "reason": "..."}
+  {"index": "legibility:3", "verdict": "settled", "reason": "matches Settled-Issues #2"}
+  {"index": "releng:1", "verdict": "pre-existing", "reason": "lines last touched in a4f21c9, outside this PR"}
+  {"index": "compatibility:0", "verdict": "false-positive", "reason": "re-read code, claim does not hold"}
+  ```
+
+  Include `from` and `to` only for `downgraded` / `upgraded`.
+
+  ## adjusted_counts
+
+  ```json
+  {"P0": <n>, "P1": <n>, "P2": <n>, "P3": <n>, "settled": <n>, "pre_existing": <n>, "false_positive": <n>}
+  ```
+  ````
+
+The orchestrator applies the verdicts in Step 5: drop only `false-positive`; relabel severities for `downgraded` / `upgraded`; render `settled` and `pre-existing` in their own section; preserve `kept` as-is.
+
+### Step 5: Aggregate and render
+
+The orchestrator now holds structured JSONL `findings` blocks from each lens (Step 4) and `verdicts` from the auditor (Step 4.5). Aggregation is mechanical:
+
+- **Apply auditor verdicts first.** Drop *only* findings whose verdict is `false-positive`. Set `severity` from the `to` field for `downgraded` / `upgraded`. Route `settled` and `pre-existing` to their own section (they are real; they're just already-decided). Keep `kept` as-is.
+- **Deduplicate by `(file, line, category)`.** When two lenses flag the same cell (e.g. `review-code` flags the bug, `review-legibility` flags the unclear branching), merge into one entry: keep the higher-severity framing, concatenate the `description`s, and record both lenses in a `lenses` array on the merged finding.
+- **Sort** by severity (`P0` first), then by lens (run order), then by `file:line`.
+- **Render** each surviving finding using the Finding render schema below. This is the first time markdown enters the pipeline.
+- **Summarize** at the top: counts by severity, lenses run/skipped, auditor false-positive/severity-change counts.
+- **Recommend next step**: fix `P0`/`P1` findings, re-run the relevant lens(es), then merge.
+
+**Do not trim the report to a comfortable length.** Severity sections are how a
+long report stays readable — a reader who only wants blockers reads the P0/P1
+sections and stops. Cutting real P2s and P3s to make the report look shorter
+throws away the findings most likely to be cheap to fix, and the reader has no
+way to know they existed. If the count is genuinely large, say so in the summary
+line and let the sections do their job.
+
+Every finding has a `permalink` field built by the lens subagent (full SHA, ≥1 line context above/below). Use it as the clickable header for each rendered finding.
+
+#### Finding render schema
+
+Plain-text severity labels (no emoji). Collapse `why_it_matters` into a
+`<details>` block when it adds context beyond the description; otherwise
+omit. For self-contained fixes ≤ 5 lines, append a GitHub `suggestion` block
+at the **top level** of the finding (NOT nested inside `<details>` — GitHub
+won't render suggestions inside details). Append a machine-readable trailer
+as the last line of every rendered finding:
+`<!-- kmosher-review: severity=<sev> confidence=<conf> lens=<lens> -->`
+
+If `REVIEW.md` (from Step 1) defines its own severity labels
+(e.g. `Important` / `Nit` / `Pre-existing` instead of P0–P3), use those —
+`REVIEW.md` overrides the default tier names.
+
+Final report format:
+
+```
+# Review summary for <PR/branch> (SHA <short-sha>)
+
+Lenses run: <list>
+Lenses skipped: <list, with one-line reason each>
+Automated tools run: <list>
+Cross-model (codex): <verdict + finding count | skipped: reason>
+Auditor: <n findings audited; n dropped as false-positive; n severity changes; n settled/pre-existing>
+
+## Findings by severity
+
+### P0 (X findings)
+- **<source lens>** — <permalink>
+
+  **P0** — <category>
+
+  <what's wrong (1–3 sentences, concrete)>
+
+  *Fix:* <proposed fix>
+
+  <details><summary>Why this matters</summary>
+
+  <real-scenario impact>
+
+  </details>
+
+  *Confidence:* <low/medium/high>
+
+  <!-- kmosher-review: severity=P0 confidence=<confidence> lens=<lens> -->
+
+### P1 (Y findings)
+[same structure, **P1** label]
+
+### P2 (Z findings)
+[same structure, **P2** label]
+
+### P3 (W findings)
+[same structure, **P3** label]
+
+## Settled / pre-existing (V findings)
+
+Findings that hold up but were already decided, or predate this PR. Listed so
+the decision is visible and can be revisited, not because they block anything.
+
+<same structure, with the auditor's `reason` as the lead line>
+
+## Prior PR guidance noted (informational)
+<list from Step 1.5 "Applicable prior guidance" that wasn't directly raised as a finding>
+
+## Recommended next steps
+
+[What to fix first; what to defer; whether to re-run any lens after fixes]
+```
+
+If no findings survived the audit: say so explicitly. The PR is ready to merge from these lenses' perspectives. Mention how many findings the auditor dropped as false positives so the user knows it ran and did its job.
+
+### Step 5.5: Persist the run record (best-effort)
+
+Everything a later evaluation of these skills would need coexists only here, in
+the orchestrator's context, and is gone once the session ends. Write it down.
+
+This step is bookkeeping and must never block, fail, or alter the review. If
+anything goes wrong — no capture root, an unwritable path, a command that
+returns nonzero — abandon the step silently and go to Step 6. Never report a
+capture problem to the user, never retry, never ask.
+
+Capture root: the first of `$REVIEWBENCH_DIR`, `~/.cache/metawork/reviewbench`,
+`~/.reviewbench` that **already exists** as a directory; if none exists, the
+machine has not opted in — skip the step. Never create one: the directory's
+existence is the opt-in.
+
+Otherwise write a bundle to `<root>/incoming/<run-id>/`, where run-id is
+`<YYYYMMDD-HHMM>-<repo>-<short head SHA>-<sess8>` — `<repo>` the repo basename,
+`<sess8>` the first 8 characters of the session id, and the timestamp UTC from
+`date -u +%Y%m%d-%H%M`, never derived by the model. With no commit to name,
+`wip` replaces the SHA field alone: `20260731-1412-metawork-wip-a1b2c3d4`.
+
+**The session id is the harness's own UUID** — the `3131ad55-…` form that names
+this session's transcript directory — and never the `session_01Abc…` id that
+appears in share links and attribution footers. Every consumer joins on the
+UUID: the SubagentStop hook stamps its fragments with it, and ingest's only
+means of attaching a lens fragment to the run that dispatched it is
+`session_id` equality. A share id here does not degrade the join, it removes
+it, and the bundle's own lenses are stranded as orphans beside it. The footer
+form is the one on display in most sessions, so read the id off the transcript
+path rather than off any prose in context, and write it whole into
+`session_id`, not just the eight characters the run-id uses.
+
+Write `manifest.json` **first**, before the findings, the diff or the report,
+and patch `ended_at` into it at the close. It is the file that makes everything
+beside it ingestible: a bundle without one is quarantined whole, however much
+else it holds. Everything the manifest needs is known at Step 1, and a review
+can be interrupted at any point after that — writing it last means the one file
+that unlocks the other artifacts is the one least likely to survive.
+
+- `manifest.json` — the fields below, `null` for anything unknown.
+- `findings-<lens>.jsonl` — one file per lens, that lens's Step 4 `findings`
+  block verbatim and **pre-audit**: no verdicts applied, no dedupe, no severity
+  relabeling. `<lens>` is the short lens name, spelled exactly as in the
+  manifest's `lenses` array and the auditor's verdict keys — the six legal
+  names are `findings-code.jsonl`, `findings-legibility.jsonl`,
+  `findings-compatibility.jsonl`, `findings-releng.jsonl`,
+  `findings-agent-skills.jsonl`, and `findings-codex.jsonl` (Step 4.4).
+- `verdicts.jsonl` — the auditor's Step 4.5 block verbatim. Omit the file if the
+  auditor didn't run.
+- `diff.patch` — a real unified diff against the base SHA, one that `git apply`
+  would accept. On a dirty tree it must cover the uncommitted changes the
+  lenses actually reviewed: run `git diff <base sha>`, then append one
+  `git diff --no-index /dev/null <file>` per untracked file. Never concatenate
+  raw file contents — bytes with no `diff --git`/`@@` headers are not a patch.
+- `report.md` — the rendered report from Step 5.
+
+```json
+{
+  "run_id": "…", "captured_at": "<ISO 8601 UTC>", "source": "review-router",
+  "repo_path": "<absolute path>", "repo": "<bare repo basename>",
+  "owner_repo": "<owner/repo, null if no GitHub remote>", "branch": "…",
+  "base_sha": "…", "head_sha": "…", "uncommitted": false,
+  "started_at": "<ISO 8601 UTC>", "ended_at": "<ISO 8601 UTC>",
+  "plugin_version": "<the version field of ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>",
+  "review_md_sha256": "<sha256 of REVIEW.md, null if absent>",
+  "lenses": ["code", "legibility"], "models": {"code": "<model>"},
+  "session_id": "<the harness UUID, not a session_01… share id>",
+  "notes": "<anything odd about this run, else empty>",
+  "codex": {"thread_id": "…", "model": "<from ~/.codex/config.toml>",
+            "reasoning_effort": "<from ~/.codex/config.toml, null if unset>",
+            "seconds": <wall-clock of the Step 4.4 call>, "exit_status": 0,
+            "findings": <n mapped>, "skipped": null},
+  "posted_pr": null, "posted_comment_id": null, "posted_at": null
+}
+```
+
+Fields consumers are strict about:
+
+- `repo` is the bare basename and `owner_repo` the GitHub slug. Every reader
+  keys the slug off `owner_repo` and none falls back to `repo`, so a slug
+  written into `repo` reads as a repo named `owner/repo` and the run is skipped.
+- `base_sha` is Step 1's merge-base, recorded now because fast-forward folds
+  erase the branch point — the base is not reconstructible after the fact.
+- `started_at` is Step 1's timestamp, `ended_at` the capture time. They are the
+  search window downstream uses to match this run against later commits.
+- Every timestamp is ISO 8601 UTC from `date -u`, never model-derived.
+- `codex` is the only record of what Step 4.4 cost. Claude-side agents can be
+  re-costed later from their transcripts; Codex's cannot, and `thread_id` is
+  the one handle that reaches its history. When the step was skipped, write
+  `{"skipped": "<reason>"}` and nothing else; when the Codex CLI is not on
+  this machine at all, `null`.
+
+The three `posted_*` fields stay null here; Step 6 fills them if the report is
+posted. They record which PR this review was actually of — the one fact that
+ties a run to a PR by observation rather than inference. Everything downstream
+otherwise has to guess it back from SHAs and branch names, and guesses wrong
+often enough to matter.
+
+On success add exactly one line to the chat output, after the report —
+`run captured to <path>`. It goes nowhere else: not into `report.md`, not into
+the comment Step 6 posts. On a skip, say nothing at all.
+
+### Step 6: Offer to post the report to the PR
+
+After printing the report, decide whether to offer posting it as a PR comment:
+
+- **Skip the offer entirely** if any of: `$ARGUMENTS` contains `local` / `no post` / `don't post`; no PR exists for the branch (Step 1's `gh
+  pr view` returned no PR); zero findings survived the audit (nothing useful
+  to post).
+- **Otherwise, ask the user** with a single concise prompt: `Post this review as
+  a comment on PR #<num>? (yes / no )`. Unless the user has already indicated
+  intent they want the review posted
+
+If the user says yes, post via `gh pr comment <num> --body-file <path>`. Write the comment body to a file under the session tmpdir. The comment body should be the same final report from Step 5, with two adjustments:
+
+1. Replace the top-line `# Review summary for <PR/branch> (SHA <short-sha>)` with `## Review summary (SHA <short-sha>)` — GitHub renders the `##` better in a PR comment, and the PR number is implicit.
+2. Append a trailing line: `<sub>Generated by the [kmosher-review](https://github.com/kmosher/claude-plugins) skills suite. React 👍 if useful, 👎 if not.</sub>`
+
+Do not auto-post without clear intent or confirmation. Posting to a PR is visible to others.
+
+**After a successful post, record where it went.** `gh pr comment` prints the
+new comment's URL, whose `#issuecomment-<id>` fragment is the comment id. If
+Step 5.5 wrote a bundle and `<root>/incoming/<run-id>/manifest.json` is still
+there, set its three `posted_*` fields — `posted_pr` the PR number **as a JSON
+integer**, `posted_comment_id` that id, `posted_at` the current time from
+`date -u` — and change nothing else in the file.
+
+Do the manifest update in the same turn as the `gh pr comment` call. The user's
+yes/no is a new message, which ends the `allowed-tools` grant `/review` was
+invoked under — the post is already outside it, and keeping the write beside the
+post means one permission state to settle instead of two. A prompt on either is
+tolerated, not avoided: answer or decline and move on. The review itself is
+complete by this point, so the step still never blocks and never retries.
+
+Skip silently if the bundle is gone: an ingest pass has already taken it, and
+re-creating the directory would hand ingest a second, conflicting record of a
+run it has finished with.
+
+## Notes for the orchestrator
+
+- **Stay in routing mode, not reviewing mode.** Your job is to dispatch subagents and aggregate their output. You should never read the files being reviewed yourself; never run lint inline; never load the review-* skills via `Skill` in this conversation. The subagents do all of that in their own context.
+- **Never manufacture findings.** If a subagent reports no novel issues, faithfully relay that. Padding the report wastes the user's attention.
+- **Never drop a finding that holds.** The auditor's `false-positive` verdict is the only thing that removes one. You are not a second filter — you have read none of the code, so a finding that looks minor from the orchestrator's seat is one you are the least qualified reader to cut.
+- **Spawn only the subagents these steps name.** One per lens, plus the eligibility gate, the miner, the lint sweep, and the auditor. Do not add a subagent to double-check another subagent, to re-verify the auditor, or to split a lens across files — each lens is one dispatch over the whole diff.
+- **Don't re-derive the skill's logic.** Each skill encodes its own technique; the subagent invokes it. Pass the change, accept the output.
+- **Confidence calibration matters.** Pass through each finding's confidence label (low/medium/high). Low-confidence findings are still surfaced but called out as such.
+- **Auto-route, but explain.** Always tell the user which lenses you picked and why before dispatching subagents. They may want to override (e.g. "only legibility, the correctness is settled").
+- **Respect the user's override.** If `$ARGUMENTS` includes a hint like "only legibility" or "skip migration", honor it rather than the auto-routing. The two always-run lenses (review-code, review-legibility) can also be skipped on explicit request.
+
+## Arguments
+
+`$ARGUMENTS` may contain:
+- A PR number (e.g. `3405` or `#3405`)
+- A branch name
+- An override phrase (e.g. `only legibility`, `skip migration`, `all lenses`, `quick`)
+- `skip codex` / `no codex` — suppresses the Step 4.4 cross-model pass, which bills to the user's ChatGPT subscription rather than their Claude usage
+- `local` (or `local review`, `no post`, `don't post`) — suppresses the Step 6 offer to post the report as a PR comment
+- `defer-comment-judgment` — `review-legibility` leaves comment prose to a dedicated comment pass running after this review, and still returns its structural and misleading-comment findings. Set by `kmo:polish`, whose next stage is `kmo:finalize`; pass it by hand only when something comparable follows.
+- Combinations (e.g. `3405 only code`, `3405 skip legibility`, `3405 local`)
+
+If empty, default to the current branch with auto-routing.

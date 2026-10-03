@@ -2,7 +2,7 @@
 
 A small public marketplace of [Claude Code](https://docs.claude.com/en/docs/claude-code) plugins I use day-to-day. Currently ships:
 
-- **`kmosher-review`** — a multi-lens code-review suite. The `/review` command routes a PR through four review lenses (correctness, legibility, compatibility, release-engineering) in their own subagents, runs project lint tools, and produces one prioritized report with GitHub permalinks.
+- **`kmosher-review`** — a multi-lens code-review suite. The `/review` command runs the `review-run` harness: each applicable review lens (correctness, legibility, compatibility, release-engineering, agent-skills) runs as its own process, an auditor checks every finding against the code, and one severity-sorted report comes out. `/kmosher-review:review-router` is the previous model-run flow, kept as a fallback; it also does prior-PR comment mining, a codex cross-model pass and a lint sweep.
 
 ## Install
 
@@ -14,10 +14,11 @@ A small public marketplace of [Claude Code](https://docs.claude.com/en/docs/clau
 Then in any repo with a current branch or PR:
 
 ```
-/review              # auto-routes lenses based on what the diff touches
+/review              # lenses chosen by what the diff touches
 /review 1234         # review PR #1234
 /review only legibility
 /review local        # don't offer to post the report as a PR comment
+/review router       # run the previous model-run flow instead
 ```
 
 ## What's in `kmosher-review`

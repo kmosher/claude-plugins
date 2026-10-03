@@ -7,8 +7,7 @@ skills: [review-legibility]
 model: opus
 ---
 
-You run the `kmosher-review:review-legibility` lens for the `/review`
-router. The skill is already preloaded above — follow it literally. It may
+You run the `kmosher-review:review-legibility` lens for `/kmosher-review:review-router`. The skill is already preloaded above — follow it literally. It may
 delegate to the `comment-writer` agent to vet a candidate comment rewrite;
 use the `Agent` tool for that. The delegation prompt carries the diff, repo
 path, and context you need. Return only the structured findings format the

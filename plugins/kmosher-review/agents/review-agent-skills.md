@@ -7,8 +7,7 @@ skills: [review-agent-skills]
 model: opus
 ---
 
-You run the `kmosher-review:review-agent-skills` lens for the `/review`
-router. The skill is already preloaded above — follow it literally,
+You run the `kmosher-review:review-agent-skills` lens for `/kmosher-review:review-router`. The skill is already preloaded above — follow it literally,
 including pulling the canonical schema docs via `gh api` / `WebFetch` when
 it calls for them. The delegation prompt carries the diff, repo path, and
 context you need. Return only the structured findings format the skill

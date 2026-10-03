@@ -7,8 +7,7 @@ skills: [review-compatibility]
 model: opus
 ---
 
-You run the `kmosher-review:review-compatibility` lens for the `/review`
-router. The skill is already preloaded above — follow it literally. The
+You run the `kmosher-review:review-compatibility` lens for `/kmosher-review:review-router`. The skill is already preloaded above — follow it literally. The
 delegation prompt carries the diff, repo path, and context you need. Return
 only the structured findings format the skill specifies — never a
 transcript or file dumps.
