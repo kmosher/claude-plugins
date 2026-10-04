@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(grep:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(/opt/metawork/bin/review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
+allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(/opt/metawork/bin/review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
 description: Code review of the current change, run by the deterministic `review-run` harness — lenses, auditor, severity-sorted report, capture bundle. Offers to post the report to the PR.
 disable-model-invocation: false
 ---
@@ -68,10 +68,8 @@ Lens overrides: node names are `code`, `compatibility`, `releng`, `agent-skills`
 Start one Bash call with `run_in_background: true` and `dangerouslyDisableSandbox: true` (the harness launches `claude -p` children, which the sandbox blocks):
 
 ```
-<review-run> --graph ${CLAUDE_PLUGIN_ROOT}/graphs/<graph>.toml --workspace <repo root> --base <base sha> [--head <head sha>] [--skip <node>]... [--max-p3 <n>] > <tmp>/review-run.out 2> <tmp>/review-run.err
+<review-run> --graph ${CLAUDE_PLUGIN_ROOT}/graphs/<graph>.toml --workspace <repo root> --base <base sha> [--head <head sha>] [--skip <node>]... > <tmp>/review-run.out 2> <tmp>/review-run.err
 ```
-
-If the repo root has a `REVIEW.md` that states a numeric cap on nits or lowest-severity findings (`grep -inE 'at most|no more than|up to|max' <repo root>/REVIEW.md` finds the sentence), add `--max-p3 <n>`; the harness applies it to the report's P3 section.
 
 `<tmp>` is the session temp directory from your system prompt. Pass `--head` only when the tree is clean; a dirty tree is reviewed as it stands, uncommitted changes included. Tell the user the graph, the base and head being reviewed, and that it takes about 5–8 minutes. Then wait for the completion notice; do not poll.
 
