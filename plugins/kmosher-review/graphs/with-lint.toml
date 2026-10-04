@@ -77,3 +77,10 @@ effort = "high"
 needs = ["code", "legibility", "compatibility", "releng", "agent-skills"]
 per_need = true
 system_prompt = ["auditor.md"]
+
+[[node]]
+name = "dedupe"
+kind = "merger"
+model = "sonnet"
+tools = []
+system_prompt = ["merger.md"]

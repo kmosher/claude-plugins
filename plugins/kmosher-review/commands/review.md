@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(/opt/metawork/bin/review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
+allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(grep:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(/opt/metawork/bin/review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
 description: Code review of the current change, run by the deterministic `review-run` harness — lenses, auditor, severity-sorted report, capture bundle. Offers to post the report to the PR.
 disable-model-invocation: false
 ---
@@ -63,13 +63,15 @@ Graph, from `$ARGUMENTS`:
 - `with-lint` if it contains `lint` — adds a mechanical `lint` node that runs the repo's lint tools over the changed files and feeds their diagnostics into the report.
 - `default` otherwise.
 
-Lens overrides: node names are `code`, `compatibility`, `releng`, `agent-skills`, `legibility`, `auditor`. `only legibility` means `--skip` every lens but that one; `skip releng` means `--skip releng`. Lenses whose triggers don't fire are skipped by the harness on its own.
+Lens overrides: node names are `code`, `compatibility`, `releng`, `agent-skills`, `legibility`, `auditor`, `dedupe` (folds one defect raised by several lenses into a single finding). `only legibility` means `--skip` every lens but that one; `skip releng` means `--skip releng`. Lenses whose triggers don't fire are skipped by the harness on its own.
 
 Start one Bash call with `run_in_background: true` and `dangerouslyDisableSandbox: true` (the harness launches `claude -p` children, which the sandbox blocks):
 
 ```
-<review-run> --graph ${CLAUDE_PLUGIN_ROOT}/graphs/<graph>.toml --workspace <repo root> --base <base sha> [--head <head sha>] [--skip <node>]... > <tmp>/review-run.out 2> <tmp>/review-run.err
+<review-run> --graph ${CLAUDE_PLUGIN_ROOT}/graphs/<graph>.toml --workspace <repo root> --base <base sha> [--head <head sha>] [--skip <node>]... [--max-p3 <n>] > <tmp>/review-run.out 2> <tmp>/review-run.err
 ```
+
+If the repo root has a `REVIEW.md` that states a numeric cap on nits or lowest-severity findings (`grep -inE 'at most|no more than|up to|max' <repo root>/REVIEW.md` finds the sentence), add `--max-p3 <n>`; the harness applies it to the report's P3 section.
 
 `<tmp>` is the session temp directory from your system prompt. Pass `--head` only when the tree is clean; a dirty tree is reviewed as it stands, uncommitted changes included. Tell the user the graph, the base and head being reviewed, and that it takes about 5–8 minutes. Then wait for the completion notice; do not poll.
 
@@ -100,7 +102,7 @@ Record where it went, in the same turn as the post. `gh pr comment` prints the c
 
 ## What this path doesn't do
 
-No prior-PR comment mining, no codex cross-model pass, no GitHub permalinks in the report (findings cite `file:line`). `/kmosher-review:review-router` runs those steps; it is the previous model-run flow.
+No prior-PR comment mining, no codex cross-model pass. Findings link to the reviewed commit on GitHub only when the checkout has a GitHub origin and a clean tree. `/kmosher-review:review-router` runs those steps; it is the previous model-run flow.
 
 ## Arguments
 
