@@ -1,0 +1,102 @@
+#!/run/current-system/sw/bin/bash
+# A review-run mechanical node: report concerns that earlier reviewers raised on
+# the changed files and that were adjudicated against, so the generators do not
+# raise them again.
+#
+# stdin is the mechanical contract (JSON; see docs/review-harness.md in
+# metawork), stdout is {"diagnostics": [...], "triggers": []}. Each diagnostic
+# is a settled issue from a merged PR touching a changed file. Anything that
+# stops the mining (no gh, no claude, no GitHub remote, no PRs) yields no
+# diagnostics: this node never fails the run.
+
+set -uo pipefail
+
+MAX_FILES="${PRIOR_COMMENTS_MAX_FILES:-10}"
+MAX_PRS="${PRIOR_COMMENTS_MAX_PRS:-5}"
+log() { echo "prior-comments: $*" >&2; }
+
+tmp=$(mktemp -d 2>/dev/null) || tmp=""
+trap '[[ -n "$tmp" ]] && rm -rf "$tmp"' EXIT
+rows="${tmp:-/dev/null}/rows.jsonl"
+
+finish() {
+  if [[ -s "$rows" ]]; then
+    jq -s '{diagnostics: ., triggers: []}' <"$rows"
+  else
+    echo '{"diagnostics": [], "triggers": []}'
+  fi
+  exit 0
+}
+
+[[ -n "$tmp" ]] || { log "no temp directory"; finish; }
+for tool in jq gh claude git; do
+  command -v "$tool" >/dev/null || { log "$tool is not on PATH"; finish; }
+done
+
+contract=$(cat)
+ws=$(jq -er '.workspace' <<<"$contract") || { log "stdin is not a mechanical contract"; finish; }
+base=$(jq -r '.base // empty' <<<"$contract")
+head=$(jq -r '.head // empty' <<<"$contract")
+ws="${ws%/}"
+
+url=$(git -C "$ws" remote get-url origin 2>/dev/null) || { log "no origin remote"; finish; }
+repo=$(sed -E 's#^(git@|ssh://git@|https?://)[^/:]+[:/]##; s#\.git$##' <<<"$url")
+[[ "$repo" == */* ]] || { log "cannot derive owner/repo from $url"; finish; }
+
+# Changed files, largest diffs first. Binary files show "-" and sort last.
+numstat="$tmp/numstat"
+if [[ -n "$base" && -n "$head" ]]; then
+  git -C "$ws" diff --numstat "$base" "$head" 2>/dev/null | awk -F'\t' '{n=($1=="-")?0:$1+$2; print n "\t" $3}' | sort -rn -k1,1 >"$numstat"
+fi
+[[ -s "$numstat" ]] || jq -r '.changed_files[] | "0\t" + .' <<<"$contract" >"$numstat"
+files=()
+while IFS=$'\t' read -r _ f; do
+  [[ -n "$f" ]] && files+=("$f")
+  (( ${#files[@]} >= MAX_FILES )) && break
+done <"$numstat"
+(( ${#files[@]} )) || { log "no changed files"; finish; }
+log "$repo: ${#files[@]} files"
+
+# PR number -> files it touched, so the distilled issues can be pinned to a file.
+declare -A seen
+for f in "${files[@]}"; do
+  prs=$(gh search prs --repo "$repo" --merged --limit "$MAX_PRS" --json number,title,url -- "$f" 2>"$tmp/err") || {
+    log "gh search failed for $f: $(head -c 200 "$tmp/err")"
+    continue
+  }
+  for n in $(jq -r '.[].number' <<<"$prs" 2>/dev/null); do
+    [[ -n "${seen[$n]:-}" ]] && continue
+    seen[$n]=1
+    thread=$(gh pr view "$n" --repo "$repo" --json comments,reviews 2>/dev/null |
+      jq -r '[(.reviews[]? | select((.body // "") != "") | "\(.author.login) (\(.state)): \(.body)"), (.comments[]? | "\(.author.login): \(.body)")] | join("\n\n")' 2>/dev/null)
+    # The adjudicated concerns mostly live in inline review threads, which the
+    # JSON above omits.
+    inline=$(gh api "repos/$repo/pulls/$n/comments" --paginate 2>/dev/null |
+      jq -r '.[] | "\(.user.login) on \(.path):\(.line // .original_line // "?"): \(.body)"' 2>/dev/null)
+    thread="$inline"$'\n\n'"$thread"
+    thread="${thread#"${thread%%[![:space:]]*}"}"
+    [[ -n "$thread" ]] || continue
+    log "PR #$n touching $f: ${#thread} bytes of discussion"
+
+    prompt="Below is the review discussion from a merged pull request (#$n) that touched $f.
+List only SETTLED issues: a concern a reviewer raised that was then adjudicated against (the author or another reviewer explained why it is not a problem, or it was deliberately accepted). Skip concerns that were fixed, requested style guidance, and chatter.
+Answer with only a JSON list, no prose and no code fence: [{\"file\": \"<path the concern is about, or $f>\", \"concern\": \"...\", \"reason\": \"why it was settled\"}]. Answer [] when nothing qualifies.
+
+${thread:0:30000}"
+    reply=$(claude -p --model haiku --output-format json <<<"$prompt" 2>"$tmp/err") || {
+      log "claude failed for PR #$n: $(head -c 200 "$tmp/err")"
+      continue
+    }
+    # The model's answer is the `result` string; tolerate a code fence around it.
+    jq -r '.result // empty' <<<"$reply" | sed -E '/^```/d' >"$tmp/answer"
+    log "PR #$n: haiku answered $(wc -c <"$tmp/answer") bytes"
+    jq -c --argjson n "$n" --arg f "$f" '
+      (if type == "array" then . else [] end)[]
+      | select((.concern // "") != "" and (.reason // "") != "")
+      | {tool: "prior-pr#\($n)", file: (.file // $f), line: null,
+         message: ("settled: \(.concern) — \(.reason)" | gsub("[\n\t]"; " "))}
+    ' "$tmp/answer" >>"$rows" 2>/dev/null || log "PR #$n: answer was not a JSON list"
+  done
+done
+
+finish
