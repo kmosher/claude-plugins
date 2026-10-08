@@ -61,8 +61,8 @@ suppressed by any learned rule.
 
 ## Model ladder
 
-Sonnet: rung 1's gates, lint sweep, eligibility, prior-PR mining, mechanical
-fixes, and the legibility lens. Opus: review-code, the fixer for behaviour
+Haiku: eligibility, lint sweep, prior-PR mining. Sonnet: rung 1's gates,
+mechanical fixes, and the legibility lens. Opus: review-code, the fixer for behaviour
 changes, the altitude lens. Codex (whatever the CLI is configured with) as
 the critic, never a fifth generator. One top-tier pass at the end of a full
 work-up, on the diff plus the verify report, where the context is small and

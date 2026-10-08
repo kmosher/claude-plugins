@@ -17,7 +17,7 @@ You are routing a code review across the available `kmo` review skills:
 
 Given a PR or branch (default: the current branch), this command:
 
-0. **Eligibility check** — cheap Sonnet gate that skips closed/draft/trivial/already-reviewed PRs before spending any Opus budget.
+0. **Eligibility check** — cheap Haiku gate that skips closed/draft/trivial/already-reviewed PRs before spending any Opus budget.
 1. **Identifies the change** — gather the diff, the files touched, and the PR description (if any).
 1.5. **Prior-PR-comment mining** — surface adjudicated concerns and prior reviewer guidance from past PRs that touched these files (parallel subagent).
 2. **Classifies the change** to decide which review lenses apply.
@@ -32,7 +32,7 @@ Given a PR or branch (default: the current branch), this command:
 
 ### Step 0: Eligibility gate
 
-Before spending Opus budget, dispatch a Sonnet subagent to check whether this PR
+Before spending Opus budget, dispatch a Haiku subagent to check whether this PR
 is even worth reviewing. Skipping closed/draft/trivial PRs early is the cheapest
 defense against wasted dispatches.
 
@@ -217,13 +217,13 @@ Step 4.4 is outside this policy — it is deliberately not a Claude model, which
 is the only reason it can see what Opus cannot. Its model is whatever the user's
 `codex` CLI is configured to use; do not pass `--model` to override it.
 
-Sonnet is the floor, used only for the steps that gather rather than judge:
+Haiku is the floor, used only for the steps that gather rather than judge:
 the eligibility gate (Step 0), prior-PR mining (Step 1.5), and the lint sweep
 (Step 2.5). Each of those transcribes or summarizes something already
 determined elsewhere — a PR's state, a comment thread's conclusion, a linter's
 exit code — so a weaker model's failures show up as obviously missing data
 rather than as false confidence. Do not push a lens or the auditor down to
-Sonnet to save budget; drop a lens from the run instead, and say which one.
+a cheaper model to save budget; drop a lens from the run instead, and say which one.
 
 ### Step 3: Sequencing
 

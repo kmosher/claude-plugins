@@ -3,7 +3,7 @@ name: lint-sweep
 description: Runs project lint targets and language-specific diagnostic tools (Go, TypeScript, Rust) over a PR's changed files and returns structured mechanical findings. Used by the kmosher-review router's Step 2.5.
 tools: Bash, Read, Grep, Glob, LSP
 disallowedTools: ["mcp__*", Edit, Write, NotebookEdit]
-model: sonnet
+model: haiku
 omitClaudeMd: true
 ---
 
