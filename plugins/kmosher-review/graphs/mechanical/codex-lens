@@ -1,0 +1,79 @@
+#!/run/current-system/sw/bin/bash
+# A review-run generator node backed by Codex: run `codex exec` on the node's
+# prompt and map its answer into the finding schema.
+#
+# stdin is the command-provider envelope {node, workspace, prompt, schema},
+# stdout is generator output {"findings": [...], "upstream_reading": [],
+# "meta": ""}. A finding Codex cannot anchor to a file and line is kept at
+# confidence "low". A missing or unauthenticated codex yields no findings and
+# exit 0, with the reason on stderr.
+
+set -uo pipefail
+
+log() { echo "codex-lens: $*" >&2; }
+
+tmp=$(mktemp -d 2>/dev/null) || { log "no temp directory"; echo '{"findings": []}'; exit 0; }
+trap 'rm -rf "$tmp"' EXIT
+
+empty() {
+  log "$1"
+  jq -n --arg m "$1" '{findings: [], upstream_reading: [], meta: $m}'
+  exit 0
+}
+
+command -v jq >/dev/null || { log "jq is not on PATH"; echo '{"findings": []}'; exit 0; }
+command -v codex >/dev/null || empty "codex is not on PATH"
+codex login status >"$tmp/login" 2>&1 || empty "codex is not authenticated: $(tail -n 1 "$tmp/login")"
+
+envelope=$(cat)
+ws=$(jq -er '.workspace' <<<"$envelope") || empty "stdin is not an envelope"
+prompt=$(jq -er '.prompt' <<<"$envelope") || empty "envelope has no prompt"
+
+# The finding schema as the harness constrains Claude to it. Codex's own
+# --output-schema wants a stricter dialect, so the schema travels in the prompt.
+schema=$(jq -c '.schema' <<<"$envelope")
+
+cat >"$tmp/prompt" <<PROMPT
+$prompt
+
+Answer with only a single JSON object matching this JSON Schema, with no prose and no code fence:
+$schema
+PROMPT
+
+if ! codex exec --ephemeral --skip-git-repo-check -s read-only -C "$ws" -o "$tmp/last" - <"$tmp/prompt" >"$tmp/stdout" 2>"$tmp/stderr"; then
+  empty "codex exec failed: $(tail -n 3 "$tmp/stderr" | tr '\n' ' ' | head -c 300)"
+fi
+[[ -s "$tmp/last" ]] || empty "codex produced no final message"
+
+# Take the outermost {...} so a fence or a sentence around the object is harmless.
+sed -E '/^```/d' "$tmp/last" >"$tmp/answer"
+first=$(grep -n '{' "$tmp/answer" | head -n 1 | cut -d: -f1)
+[[ -n "$first" ]] || empty "codex answered without JSON"
+tail -n "+$first" "$tmp/answer" | jq -c '.' >"$tmp/parsed" 2>/dev/null ||
+  empty "codex answer was not valid JSON"
+
+jq '
+  def sev: if . == "P0" or . == "P1" or . == "P2" or . == "P3" then . else "P3" end;
+  def conf: if . == "low" or . == "medium" or . == "high" then . else "low" end;
+  def text: if type == "string" then . else "" end;
+  {
+    findings: [
+      (if type == "array" then {findings: .} else . end).findings // [] | .[]
+      | select(type == "object" and ((.description | text) != ""))
+      | . as $f
+      | ($f + {
+          file: (if ($f.file | type) == "string" and $f.file != "" then $f.file else null end),
+          line: (if ($f.line | type) == "number" and $f.line >= 0 then ($f.line | floor) else null end),
+          severity: ($f.severity | sev),
+          confidence: ($f.confidence | conf),
+          category: ($f.category | text),
+          description: ($f.description | text),
+          why_it_matters: ($f.why_it_matters | text),
+          recommendation: ($f.recommendation | text)
+        })
+      | if .file == null or .line == null then .confidence = "low" else . end
+    ],
+    upstream_reading: [(.upstream_reading // [])[]? | select((.path | type) == "string" and (.told_me | type) == "string")],
+    meta: ((.meta // "") | text)
+  }
+' "$tmp/parsed"
