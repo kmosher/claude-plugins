@@ -12,8 +12,8 @@ wire-format = { touches = ["**/*.proto", "**/*.avsc"] }
 # name pattern skips `Test*` functions, which regex has no lookahead to exclude any shorter way.
 exported-signature = { diff_matches = '^(func (\([^)]*\) )?(?:[A-SU-Z]\w*|T(?:|[A-Za-df-z_0-9]\w*|e(?:|[A-Za-rt-z_0-9]\w*|s(?:|[A-Za-su-z_0-9]\w*|t[a-z]\w*))))[\[(]|\s*pub (async |const |unsafe )*fn |export (default )?(async )?(function|class|interface|type|enum|const) )' }
 routes = { diff_matches = '(HandleFunc|\.Handle|\.(Get|Post|Put|Patch|Delete|GET|POST|PUT|PATCH|DELETE|Any))\(\s*"/|@(Get|Post|Put|Patch|Delete)\(' }
-cli-flags = { diff_matches = '(Persistent)?Flags\(\)\.\w+\(|\bflag\.(String|Bool|Int|Int64|Duration|Float64|Var)\w*\(|#\[(arg|clap)\(' }
-config-reads = { diff_matches = '\bos\.(Getenv|LookupEnv)\(|\bprocess\.env\b|\bviper\.(Get|BindEnv|SetDefault)|\benv::var\(' }
+cli-flags = { diff_matches = '(Persistent)?Flags\(\)\.\w+\(|\bflag\.(String|Bool|Int|Int64|Duration|Float64|Var)\w*\(|#\[(arg|clap)\(|\.add_argument\(\s*["\x27]-|@click\.(option|argument)\(' }
+config-reads = { diff_matches = '\bos\.(Getenv|LookupEnv)\(|\bprocess\.env\b|\bviper\.(Get|BindEnv|SetDefault)|\benv::var\(|\bos\.(environ|getenv)\b' }
 # A changelog file is an API-version signal; a per-change `changelog/` directory of entries is not.
 client-surface = { touches = ["**/CHANGELOG*", "**/sdk/**"] }
 service = { touches = ["**/pkg/server/**", "**/cmd/server/**", "**/services/**", "**/api/**"] }
