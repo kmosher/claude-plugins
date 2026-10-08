@@ -74,6 +74,6 @@ system_prompt = ["auditor.md"]
 [[node]]
 name = "dedupe"
 kind = "merger"
-model = "sonnet"
+model = "haiku"
 tools = []
 system_prompt = ["merger.md"]
