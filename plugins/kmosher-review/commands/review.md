@@ -21,7 +21,7 @@ Dispatch `Agent(subagent_type="kmosher-review:eligibility-gate", description="PR
   1. `gh pr view <id> --json state,isDraft,mergeable,additions,deletions,changedFiles,comments,reviews,commits,author`. No PR for the branch: `proceed`, reason "no PR yet, reviewing branch directly".
   2. Skip if `state` is `CLOSED` or `MERGED`. Drafts proceed unless `$ARGUMENTS` includes `skip-draft`.
   3. Skip if `additions + deletions < 20` and every changed file is docs (`.md`), generated, a fixture (`.golden`, `.snap`), or tests with no source change.
-  4. Skip if the PR has a top-level comment from the `gh auth status` user starting `## Review of` or `## Review summary` and no commit landed after it (compare timestamps in `comments` and `commits`).
+  4. Skip if the PR has a top-level comment from the `gh auth status` user starting `## Review of` or `## Review summary` and no commit landed after it (compare timestamps in `comments` and `commits`). Omit this check when `$ARGUMENTS` contains `quick`: it runs on every commit.
   5. Otherwise `proceed`.
 - **Output**, only this:
   ```
@@ -59,6 +59,8 @@ Security-touching changes — auth, tokens, credentials, new external endpoints,
 
 Graph, from `$ARGUMENTS`:
 
+- `quick` if it contains `quick` — the every-commit graph: cheap readers for easy bugs and inconsistencies, no Opus.
+- `deep` if it contains `deep` — if `${CLAUDE_PLUGIN_ROOT}/graphs/deep.toml` does not exist (`test -f`), say `deep graph not found` and stop; do not fall back to another graph.
 - `defer-comments` if it contains `defer-comment-judgment` — the legibility lens leaves comment prose to a later comment pass (`kmo:finalize`) and still reports wrong or misplaced comments.
 - `with-lint` if it contains `lint` — adds a mechanical `lint` node that runs the repo's lint tools over the changed files and feeds their diagnostics into the report.
 - `default` otherwise.
@@ -113,6 +115,7 @@ No prior-PR comment mining, no codex cross-model pass. Findings link to the revi
 - `skip-draft` — let the gate skip drafts
 - `defer-comment-judgment` — use the `defer-comments` graph. Set by `kmo:polish`, whose next stage is `kmo:finalize`.
 - `lint` — use the `with-lint` graph
+- `quick` or `deep` — the depth: the `quick` or `deep` graph, taking precedence over the two above. `quick` also skips the gate's "already reviewed" check. With neither, the default graph.
 - `router` — run the previous model-run flow instead
 
 `skip codex` is gone: codex runs only in the router.
