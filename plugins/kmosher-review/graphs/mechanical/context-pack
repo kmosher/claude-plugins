@@ -1,0 +1,394 @@
+#!/usr/bin/env python3
+"""A review-run mechanical node: point the generators at the files outside the
+diff that the changed files depend on or are depended on by, so a lens can
+check a claim against the file it is about instead of trusting it.
+
+stdin is the mechanical contract (JSON; see docs/review-harness.md in
+metawork), stdout is {"diagnostics": [...], "triggers": []}. Each diagnostic is
+one pointer, never file contents:
+
+    <changed file> -> <kind>: <path>[:<line>] -- <why>
+
+kinds are referrer (a file elsewhere that mentions a changed, renamed or
+deleted path), include (a Makefile include, a relative TS/JS import, a
+Dockerfile build input), package (a Go sibling in the same package) and
+sibling (a function in the same file with a similar name to a changed one).
+The whole output is capped at MAX_ITEMS. Any error yields fewer items, or none;
+this node never fails the run.
+"""
+
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+MAX_ITEMS = int(os.environ.get("CONTEXT_PACK_MAX_ITEMS", "118"))
+MAX_FILES = 30
+MAX_REFERRERS = 8
+MAX_IMPORTS = 6
+DEADLINE = time.monotonic() + 8.0
+
+GENERIC_BASENAMES = {
+    "index.ts", "index.js", "index.tsx", "main.go", "main.py", "main.rs", "mod.rs", "lib.rs",
+    "readme.md", "makefile", "dockerfile", "build.bazel", "package.json", "config.ts", "config.go",
+    "config.py", "utils.ts", "utils.go", "types.ts", "types.go", "test.ts", "setup.py", "__init__.py",
+    "tsconfig.json", "go.mod", "cargo.toml", "pulumi.yaml", ".gitignore", ".dockerignore",
+}
+SKIP_DIRS = ("node_modules", "vendor", "third_party", "dist", "build", "bazel-*", "generated", "__generated__")
+SKIP_FILES = ("*.pb.go", "*.pb.ts", "*_generated.*", "*.gen.*", "*.lock", "package-lock.json", "go.sum",
+              "*.min.js", "*.snap", "CHANGELOG*", "*.svg", "*.png")
+KEYWORDS = {"if", "for", "while", "switch", "catch", "function", "return", "constructor", "else", "do", "try"}
+
+DEF_PATTERNS = {
+    ".go": [r"^func\s+(?:\([^)]*\)\s*)?(\w+)"],
+    ".ts": [r"^\s*(?:export\s+)?(?:default\s+)?(?:async\s+)?function\*?\s+(\w+)",
+            r"^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:async\s*)?(?:\([^)]*\)|\w+)\s*(?::[^=]+)?=>",
+            r"^\s+(?:(?:public|private|protected|static|async|readonly)\s+)*(\w+)\s*\([^)]*\)\s*(?::\s*[^{;]+)?\{\s*$"],
+    ".py": [r"^\s*(?:async\s+)?def\s+(\w+)"],
+    ".rs": [r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:unsafe\s+)?fn\s+(\w+)"],
+    ".sh": [r"^(?:function\s+)?(\w+)\s*\(\)\s*\{"],
+}
+for _ext in (".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+    DEF_PATTERNS[_ext] = DEF_PATTERNS[".ts"]
+DEF_PATTERNS[".bash"] = DEF_PATTERNS[".sh"]
+DEF_PATTERNS[".zsh"] = DEF_PATTERNS[".sh"]
+
+
+def remaining():
+    return max(0.5, DEADLINE - time.monotonic())
+
+
+def git(ws, *args):
+    """Stdout of a git command, or "" on any failure or when the deadline is spent."""
+    if time.monotonic() > DEADLINE:
+        return ""
+    try:
+        r = subprocess.run(["git", "-C", ws, *args], capture_output=True, timeout=remaining(),
+                           text=True, errors="replace")
+    except Exception:
+        return ""
+    return r.stdout if r.returncode == 0 else ""
+
+
+class Repo:
+    def __init__(self, ws, base, head):
+        self.ws, self.base, self.head = ws, base, head
+        self.rev = head or ""
+        listing = git(ws, "ls-tree", "-r", "--name-only", self.rev) if self.rev else git(ws, "ls-files")
+        self.tree = set(listing.splitlines())
+        self._cache = {}
+        self.edited = set()
+
+    def read(self, path):
+        if path not in self._cache:
+            if self.rev:
+                text = git(self.ws, "show", f"{self.rev}:{path}")
+            else:
+                try:
+                    with open(os.path.join(self.ws, path), errors="replace") as fh:
+                        text = fh.read()
+                except Exception:
+                    text = ""
+            self._cache[path] = text
+        return self._cache[path]
+
+
+def skipped(path):
+    from fnmatch import fnmatch
+    parts = path.split("/")
+    if any(fnmatch(p, d) for p in parts[:-1] for d in SKIP_DIRS):
+        return True
+    return any(fnmatch(parts[-1], f) for f in SKIP_FILES)
+
+
+def changed_set(ws, base, head, contract):
+    """[(status, old, new)] with status in A M D R; renames need base and head."""
+    out = []
+    if base and head:
+        raw = git(ws, "diff", "-M", "--name-status", "-z", base, head)
+        toks = raw.split("\0")
+        i = 0
+        while i < len(toks) and toks[i]:
+            st = toks[i][0]
+            if st in "RC":
+                old, new = toks[i + 1], toks[i + 2]
+                out.append(("R" if st == "R" else "A", old, new))
+                i += 3
+            else:
+                out.append((st, toks[i + 1], toks[i + 1]))
+                i += 2
+    if not out:
+        out = [("M", f, f) for f in contract.get("changed_files") or []]
+    return out
+
+
+def added_lines(ws, base, head, contract):
+    """{new path: [added line numbers]} from the diff the harness saved, else git."""
+    text = ""
+    p = contract.get("diff")
+    if p:
+        try:
+            with open(p, errors="replace") as fh:
+                text = fh.read()
+        except Exception:
+            text = ""
+    if not text and base and head:
+        text = git(ws, "diff", "-U0", "-M", base, head)
+    result, path, n = {}, None, 0
+    for line in text.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            path = path[2:] if path.startswith("b/") else (None if path == "/dev/null" else path)
+        elif line.startswith("@@"):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
+            n = int(m.group(1)) if m else 0
+        elif path and n:
+            if line.startswith("+"):
+                result.setdefault(path, []).append(n)
+                n += 1
+            elif line.startswith(" "):
+                n += 1
+    return result
+
+
+def tokens(name):
+    name = name.replace("_", " ")
+    name = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", name)
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", name)
+    return [t.lower() for t in name.split()]
+
+
+def definitions(repo, path):
+    pats = DEF_PATTERNS.get(os.path.splitext(path)[1].lower())
+    if not pats:
+        return []
+    pats = [re.compile(p) for p in pats]
+    defs = []
+    for i, line in enumerate(repo.read(path).splitlines(), 1):
+        if len(line) > 300:
+            continue
+        for p in pats:
+            m = p.match(line)
+            if m and m.group(1) not in KEYWORDS:
+                defs.append((i, m.group(1)))
+                break
+    return defs
+
+
+def sibling_items(repo, new, lines):
+    defs = definitions(repo, new)
+    if not defs or not lines:
+        return []
+    changed = {}
+    for ln in lines:
+        enclosing = [d for d in defs if d[0] <= ln]
+        if enclosing:
+            changed[enclosing[-1][1]] = enclosing[-1][0]
+    items = []
+    for name in list(changed)[:4]:
+        tk = tokens(name)
+        if len(tk) < 2:
+            continue
+        sibs = []
+        for line, other in defs:
+            if other == name or other in changed:
+                continue
+            ot = tokens(other)
+            shared = 0
+            while shared < min(len(tk), len(ot)) and tk[shared] == ot[shared]:
+                shared += 1
+            if shared >= 2 or (shared == 1 and len(tk) <= 2):
+                sibs.append((-shared, line, other))
+        for _, line, other in sorted(sibs)[:3]:
+            items.append((1, new, "sibling", f"{new}:{line}", f"`{other}` is named like the changed `{name}`; compare guards and error handling"))
+    return items
+
+
+def resolve(repo, base_dir, target):
+    cand = os.path.normpath(os.path.join(base_dir, target))
+    return cand if cand in repo.tree else None
+
+
+def include_items(repo, new):
+    base = os.path.basename(new)
+    d = os.path.dirname(new)
+    ext = os.path.splitext(new)[1].lower()
+    text = None
+    items = []
+    if base in ("Makefile", "makefile", "GNUmakefile") or ext in (".mk", ".mak"):
+        text = repo.read(new)
+        for i, line in enumerate(text.splitlines(), 1):
+            m = re.match(r"^-?(?:s?include)\s+(.+)$", line)
+            if not m:
+                continue
+            for t in m.group(1).split("#")[0].split():
+                if "$" in t:
+                    items.append((2, new, "include", f"{new}:{i}", f"includes `{t}`, a computed path; resolve it"))
+                    continue
+                hit = resolve(repo, d, t) or (t if t in repo.tree else None)
+                if hit:
+                    items.append((2, new, "include", hit, f"`include {t}` at {new}:{i}; check variables and flags it sets (.SHELLFLAGS, .ONESHELL, SHELL)"))
+    elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+        text = repo.read(new)
+        seen = set()
+        imports = []
+        for m in re.finditer(r"""(?:from\s+|require\(\s*|import\(\s*|import\s+)['"](\.{1,2}/[^'"]+)['"]""", text):
+            t = m.group(1)
+            for suffix in ("", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.tsx", "/index.js"):
+                hit = resolve(repo, d, t + suffix)
+                if hit and hit not in seen and hit != new:
+                    seen.add(hit)
+                    ln = text.count("\n", 0, m.start()) + 1
+                    imports.append((hit, f"imported at {new}:{ln}"))
+                    break
+        # An import that is itself edited in this diff is the likeliest cross-file contradiction.
+        imports.sort(key=lambda im: im[0] not in repo.edited)
+        for hit, why in imports[:MAX_IMPORTS]:
+            edited = hit in repo.edited
+            items.append((1 if edited else 5, new, "include", hit, why + ("; also edited in this diff" if edited else "")))
+        if len(imports) > MAX_IMPORTS:
+            items.append((5, new, "include", "...", f"{len(imports) - MAX_IMPORTS} more relative imports"))
+    elif base == "Dockerfile" or base.startswith("Dockerfile.") or ext == ".dockerfile":
+        text = repo.read(new)
+        stages = {}
+        for i, line in enumerate(text.splitlines(), 1):
+            m = re.match(r"^\s*FROM\s+\S+(?:\s+--\S+)*\s+AS\s+(\S+)", line, re.I)
+            if m:
+                stages[m.group(1).lower()] = i
+        for i, line in enumerate(text.splitlines(), 1):
+            m = re.match(r"^\s*COPY\s+--from=(\S+)", line, re.I)
+            if m:
+                name = m.group(1)
+                if name.lower() in stages:
+                    items.append((2, new, "include", f"{new}:{stages[name.lower()]}", f"stage `{name}` copied from at line {i}"))
+                else:
+                    items.append((2, new, "include", f"{new}:{i}", f"`--from={name}` is a named build context or external image; find where it is supplied"))
+            elif re.match(r"^\s*(?:COPY|ADD)\s", line, re.I):
+                args = [a for a in line.split()[1:] if not a.startswith("--")]
+                for src in args[:-1]:
+                    for cand in (os.path.normpath(os.path.join(d, src)), os.path.normpath(src)):
+                        if cand in repo.tree:
+                            items.append((2, new, "include", cand, f"copied at {new}:{i}"))
+                            break
+        for extra in ("BUILD.bazel", "BUILD", ".dockerignore"):
+            p = os.path.normpath(os.path.join(d, extra))
+            if p in repo.tree:
+                items.append((2, new, "include", p, "build definition beside the Dockerfile; check it still matches"))
+    elif ext == ".go":
+        stem = base[:-3].removesuffix("_test")
+        sibs = sorted((p for p in repo.tree if os.path.dirname(p) == d and p.endswith(".go") and p != new),
+                      key=lambda p: (not os.path.basename(p).startswith(stem), p))
+        for p in sibs[:3]:
+            items.append((4, new, "package", p, "same Go package"))
+        if len(sibs) > 3:
+            items.append((4, new, "package", d + "/", f"{len(sibs) - 3} more files in the package"))
+    return [(pri, f, kind, ptr, why) for pri, f, kind, ptr, why in items]
+
+
+def referrer_items(repo, changes):
+    """One git grep for every changed path and distinctive basename."""
+    pats = {}  # pattern -> list of (changed file, status, new path)
+    for st, old, new in changes:
+        keys = [old] if st in "DR" else [new]
+        if st == "R":
+            keys.append(new)  # a new path can already be named by files elsewhere
+        for k in keys:
+            pats.setdefault(k, []).append((new, st, old, new))
+        if st in "DR":
+            b = os.path.basename(old)
+            if b.lower() not in GENERIC_BASENAMES and len(b) >= 6:
+                pats.setdefault(b, []).append((new, st, old, new))
+    if not pats:
+        return []
+    args = ["grep", "-n", "-I", "-F"]
+    for p in pats:
+        args += ["-e", p]
+    if repo.rev:
+        args.append(repo.rev)
+    args.append("--")
+    args += [":(exclude,glob)**/%s/**" % d for d in SKIP_DIRS]
+    args += [":(exclude,glob)**/%s" % f for f in SKIP_FILES]
+    out = git(repo.ws, "grep", *args[1:])
+    hits = {}  # (pattern, referrer path) -> first line number
+    prefix = repo.rev + ":" if repo.rev else ""
+    for row in out.splitlines():
+        if prefix and row.startswith(prefix):
+            row = row[len(prefix):]
+        parts = row.split(":", 2)
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue
+        path, ln, text = parts[0], int(parts[1]), parts[2]
+        for p in pats:
+            if p in text:
+                hits.setdefault((p, path), ln)
+    items = []
+    for p, owners in pats.items():
+        for changed, st, old, new in owners:
+            found = [(path, ln) for (q, path), ln in hits.items() if q == p and path not in (old, new)]
+            found.sort()
+            if not found:
+                continue
+            for path, ln in found[:MAX_REFERRERS]:
+                if st == "D":
+                    why = f"deleted path still referenced ({'`' + p + '`'})"
+                    pri = 0
+                elif st == "R" and p != new:
+                    why = f"renamed from `{old}`; still references `{p}`"
+                    pri = 0
+                else:
+                    why = f"mentions `{p}`"
+                    pri = 3
+                if path in {n for _, _, n in changes}:
+                    why += "; also edited in this diff"
+                items.append((pri, new, "referrer", f"{path}:{ln}", why))
+            if len(found) > MAX_REFERRERS:
+                items.append((3, new, "referrer", "...", f"{len(found) - MAX_REFERRERS} more files mention `{p}`"))
+    return items
+
+
+def main():
+    contract = json.load(sys.stdin)
+    ws = contract["workspace"].rstrip("/")
+    base, head = contract.get("base") or "", contract.get("head") or ""
+    repo = Repo(ws, base, head)
+    changes = [c for c in changed_set(ws, base, head, contract) if not skipped(c[2]) or c[0] == "D"][:MAX_FILES]
+    repo.edited = {c[2] for c in changes}
+    items = []
+    for stage in (lambda: referrer_items(repo, changes),):
+        try:
+            items += stage()
+        except Exception as e:
+            print(f"context-pack: referrers: {e}", file=sys.stderr)
+    added = added_lines(ws, base, head, contract)
+    for st, old, new in changes:
+        if st == "D":
+            continue
+        for fn in (lambda: include_items(repo, new), lambda: sibling_items(repo, new, added.get(new, []))):
+            try:
+                items += fn()
+            except Exception as e:
+                print(f"context-pack: {new}: {e}", file=sys.stderr)
+    items.sort(key=lambda it: it[0])  # stable: priority, then discovery order
+    seen, diags = set(), []
+    for pri, changed, kind, ptr, why in items:
+        msg = f"→ {kind}: {ptr} — {why}"[:240]
+        if (changed, kind, ptr) in seen and ptr != "...":
+            continue
+        seen.add((changed, kind, ptr))
+        diags.append({"tool": "context-pack", "file": changed, "line": None, "message": msg})
+    if len(diags) > MAX_ITEMS:
+        extra = len(diags) - (MAX_ITEMS - 1)
+        diags = diags[:MAX_ITEMS - 1]
+        diags.append({"tool": "context-pack", "file": None, "line": None, "message": f"→ {extra} lower-priority pointers omitted"})
+    json.dump({"diagnostics": diags, "triggers": []}, sys.stdout)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except BaseException as e:
+        print(f"context-pack: {e}", file=sys.stderr)
+        sys.stdout.write('{"diagnostics": [], "triggers": []}')
+    sys.exit(0)

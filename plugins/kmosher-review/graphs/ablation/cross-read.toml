@@ -1,0 +1,89 @@
+# Adds: the context-pack mechanical node (pointers to referrers, includes and siblings outside the diff)
+# and the cross-read addendum on the code and legibility lenses.
+[defaults]
+provider = "claude"
+model = "opus"
+tools = ["Bash", "Read", "Grep", "Glob"]
+timeout = 1800
+conventions = "inline"
+
+[triggers]
+ddl = { touches = ["**/migrations/**", "**/*.sql", "**/schema/*.go"] }
+wire-format = { touches = ["**/*.proto", "**/*.avsc"] }
+# An added or removed declaration of an exported Go or Rust function or a TypeScript export; the Go
+# name pattern skips `Test*` functions, which regex has no lookahead to exclude any shorter way.
+exported-signature = { diff_matches = '^(func (\([^)]*\) )?(?:[A-SU-Z]\w*|T(?:|[A-Za-df-z_0-9]\w*|e(?:|[A-Za-rt-z_0-9]\w*|s(?:|[A-Za-su-z_0-9]\w*|t[a-z]\w*))))[\[(]|\s*pub (async |const |unsafe )*fn |export (default )?(async )?(function|class|interface|type|enum|const) )' }
+routes = { diff_matches = '(HandleFunc|\.Handle|\.(Get|Post|Put|Patch|Delete|GET|POST|PUT|PATCH|DELETE|Any))\(\s*"/|@(Get|Post|Put|Patch|Delete)\(' }
+cli-flags = { diff_matches = '(Persistent)?Flags\(\)\.\w+\(|\bflag\.(String|Bool|Int|Int64|Duration|Float64|Var)\w*\(|#\[(arg|clap)\(|\.add_argument\(\s*["\x27]-|@click\.(option|argument)\(' }
+config-reads = { diff_matches = '\bos\.(Getenv|LookupEnv)\(|\bprocess\.env\b|\bviper\.(Get|BindEnv|SetDefault)|\benv::var\(|\bos\.(environ|getenv)\b' }
+# A changelog file is an API-version signal; a per-change `changelog/` directory of entries is not.
+client-surface = { touches = ["**/CHANGELOG*", "**/sdk/**"] }
+service = { touches = ["**/pkg/server/**", "**/cmd/server/**", "**/services/**", "**/api/**"] }
+deploy = { touches = [
+  "**/.github/workflows/**",
+  "**/Dockerfile*",
+  "**/Procfile",
+  "**/{deploy,k8s,helm,pulumi,terraform,cdk}/**/*.{yaml,yml,ts}",
+] }
+auth = { touches = ["**/auth/**", "**/authn/**", "**/authz/**"], diff_matches = '(?i)\b(authn|authz|authenticat\w*|authoriz\w*|credentials?|passwords?|secrets?)\b' }
+# A renamed skill directory shows up only as new paths, so any file under one counts.
+agent-skills = { touches = [
+  "**/skills/*/**",
+  "**/commands/*.md",
+  "**/agents/*.md",
+  "**/.claude-plugin/plugin.json",
+  "**/.claude-plugin/marketplace.json",
+] }
+
+[[node]]
+name = "context-pack"
+kind = "mechanical"
+provider = "command"
+command = ["../mechanical/context-pack"]
+timeout = 60
+
+[[node]]
+name = "code"
+kind = "generator"
+effort = "high"
+system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-code/SKILL.md", "../cross-read-addendum.md"]
+
+[[node]]
+name = "compatibility"
+kind = "generator"
+trigger = ["ddl", "wire-format", "exported-signature", "routes", "cli-flags", "config-reads", "client-surface"]
+system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-compatibility/SKILL.md"]
+
+[[node]]
+name = "releng"
+kind = "generator"
+trigger = ["service", "deploy", "auth", "config-reads", "ddl"]
+system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-releng/SKILL.md", "../releng-addendum.md"]
+
+[[node]]
+name = "agent-skills"
+kind = "generator"
+trigger = ["agent-skills"]
+system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-agent-skills/SKILL.md"]
+
+[[node]]
+name = "legibility"
+kind = "generator"
+effort = "high"
+system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-legibility/SKILL.md", "../legibility-addendum.md", "../cross-read-addendum.md"]
+
+[[node]]
+name = "auditor"
+kind = "critic"
+model = "haiku"
+effort = "medium"
+needs = ["code", "legibility", "compatibility", "releng", "agent-skills"]
+per_need = true
+system_prompt = ["../auditor.md"]
+
+[[node]]
+name = "dedupe"
+kind = "merger"
+model = "haiku"
+tools = []
+system_prompt = ["../merger.md"]
