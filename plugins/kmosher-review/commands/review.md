@@ -10,7 +10,7 @@ You are the wrapper around `review-run`, a harness that runs the `kmosher-review
 
 `command -v review-run`, else `test -x /opt/metawork/bin/review-run`. Call whichever answers `<review-run>`.
 
-If neither exists, or `$ARGUMENTS` contains `router`, say so in one line (`review-run not found — using the router` / `router requested`), then Read `${CLAUDE_PLUGIN_ROOT}/commands/review-router.md` and follow it from the top with the same `$ARGUMENTS`. Nothing below applies.
+If neither exists, say `review-run not found` in one line and stop.
 
 ## Step 1: Eligibility gate
 
@@ -84,7 +84,7 @@ Read `<tmp>/review-run.err` (`tail` it if long). It holds one status line per no
 
 - `0` — nothing more.
 - `1` — say plainly that the report is incomplete, which node failed and why.
-- `2` — the run never started or its bundle could not be written: show the last lines of stderr and offer `/kmosher-review:review-router` as a fallback. Stop here.
+- `2` — the run never started or its bundle could not be written: show the last lines of stderr and stop here.
 
 End with one line, `run captured to <path>`, taken from the `bundle:` line exactly as printed. It goes nowhere else — not into the posted comment. If there is no `bundle:` line, say nothing about capture.
 
@@ -103,7 +103,7 @@ Record where it went, in the same turn as the post. `gh pr comment` prints the c
 
 ## What this path doesn't do
 
-No prior-PR comment mining, no codex cross-model pass. Findings link to the reviewed commit on GitHub only when the checkout has a GitHub origin and a clean tree. `/kmosher-review:review-router` runs those steps; it is the previous model-run flow.
+No prior-PR comment mining, no codex cross-model pass. Findings link to the reviewed commit on GitHub only when the checkout has a GitHub origin and a clean tree.
 
 ## Arguments
 
@@ -117,8 +117,5 @@ No prior-PR comment mining, no codex cross-model pass. Findings link to the revi
 - `defer-comment-judgment` — use the `defer-comments` graph. Set by `kmo:polish`, whose next stage is `kmo:finalize`.
 - `lint` — use the `with-lint` graph
 - `quick` or `deep` — the depth: the `quick` or `deep` graph, taking precedence over the two above. `quick` also skips the gate's "already reviewed" check. With neither, the default graph.
-- `router` — run the previous model-run flow instead
-
-`skip codex` is gone: codex runs only in the router.
 
 If empty, review the current branch against its merge-base.

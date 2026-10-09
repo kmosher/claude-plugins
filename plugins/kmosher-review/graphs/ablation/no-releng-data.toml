@@ -38,31 +38,31 @@ agent-skills = { touches = [
 name = "code"
 kind = "generator"
 effort = "high"
-system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-code/SKILL.md"]
+system_prompt = ["../generator-preamble.md", "../../lenses/SHARED_CONVENTIONS.md", "../../lenses/review-code/SKILL.md"]
 
 [[node]]
 name = "compatibility"
 kind = "generator"
 trigger = ["ddl", "wire-format", "exported-signature", "routes", "cli-flags", "config-reads", "client-surface"]
-system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-compatibility/SKILL.md"]
+system_prompt = ["../generator-preamble.md", "../../lenses/SHARED_CONVENTIONS.md", "../../lenses/review-compatibility/SKILL.md"]
 
 [[node]]
 name = "releng"
 kind = "generator"
 trigger = ["service", "deploy", "auth", "config-reads"]
-system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-releng/SKILL.md"]
+system_prompt = ["../generator-preamble.md", "../../lenses/SHARED_CONVENTIONS.md", "../../lenses/review-releng/SKILL.md"]
 
 [[node]]
 name = "agent-skills"
 kind = "generator"
 trigger = ["agent-skills"]
-system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-agent-skills/SKILL.md"]
+system_prompt = ["../generator-preamble.md", "../../lenses/SHARED_CONVENTIONS.md", "../../lenses/review-agent-skills/SKILL.md"]
 
 [[node]]
 name = "legibility"
 kind = "generator"
 effort = "high"
-system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md", "../../skills/review-legibility/SKILL.md", "../legibility-addendum.md"]
+system_prompt = ["../generator-preamble.md", "../../lenses/SHARED_CONVENTIONS.md", "../../lenses/review-legibility/SKILL.md", "../legibility-addendum.md"]
 
 [[node]]
 name = "auditor"

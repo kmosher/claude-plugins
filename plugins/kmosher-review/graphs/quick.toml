@@ -17,13 +17,13 @@ timeout = 600
 name = "code-resolve"
 kind = "generator"
 model = "sonnet"
-system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-code/SKILL.md", "code-resolve-addendum.md"]
+system_prompt = ["generator-preamble.md", "../lenses/SHARED_CONVENTIONS.md", "../lenses/review-code/SKILL.md", "code-resolve-addendum.md"]
 
 [[node]]
 name = "compliance"
 kind = "generator"
 model = "haiku"
-system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-code/SKILL.md", "compliance-addendum.md"]
+system_prompt = ["generator-preamble.md", "../lenses/SHARED_CONVENTIONS.md", "../lenses/review-code/SKILL.md", "compliance-addendum.md"]
 
 [[node]]
 name = "auditor"

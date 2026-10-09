@@ -2,7 +2,7 @@
 
 A small public marketplace of [Claude Code](https://docs.claude.com/en/docs/claude-code) plugins I use day-to-day. Currently ships:
 
-- **`kmosher-review`** — a multi-lens code-review suite. The `/review` command runs the `review-run` harness: each applicable review lens (correctness, legibility, compatibility, release-engineering, agent-skills) runs as its own process, an auditor checks every finding against the code, and one severity-sorted report comes out. `/kmosher-review:review-router` is the previous model-run flow, kept as a fallback; it also does prior-PR comment mining, a codex cross-model pass and a lint sweep.
+- **`kmosher-review`** — a multi-lens code-review suite. The `/review` command runs the `review-run` harness: each applicable review lens (correctness, legibility, compatibility, release-engineering, agent-skills) runs as its own process, an auditor checks every finding against the code, and one severity-sorted report comes out.
 
 ## Install
 
@@ -18,19 +18,18 @@ Then in any repo with a current branch or PR:
 /review 1234         # review PR #1234
 /review only legibility
 /review local        # don't offer to post the report as a PR comment
-/review router       # run the previous model-run flow instead
 ```
 
 ## What's in `kmosher-review`
 
-| Lens | When it runs | What it looks for |
+| Lens (internal prompt, run by the harness) | When it runs | What it looks for |
 |---|---|---|
 | `review-code` | Always | Correctness bugs — logic errors, ignored errors, schema/shape mismatches, tests that pass with a buggy implementation |
 | `review-legibility` | Always (last) | Readability — restated-code comments, misleading names, branch fanout, stale references, iteration-history scars |
 | `review-compatibility` | If the diff crosses a deploy or caller boundary | DDL/protobuf/schema changes, exported signature changes, API/config/env-var changes |
 | `review-releng` | If the diff touches a runtime service or deploy infra | Revertability, blast radius, observability gaps, rollout safety, performance |
 
-Plus the `comment-writer` agent, which `review-legibility` delegates to for non-trivial comment rewrites.
+The lens prompts live in `plugins/kmosher-review/lenses/` and are not registered as skills; `/review` is the only entry point. Plus the `comment-writer` agent, which `review-legibility` delegates to for non-trivial comment rewrites.
 
 ## How it differs from the built-in `/security-review`
 
