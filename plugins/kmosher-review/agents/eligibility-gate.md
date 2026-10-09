@@ -1,6 +1,6 @@
 ---
 name: eligibility-gate
-description: Checks whether a PR is worth running /review on — closed, merged, trivial, or already reviewed since its last commit. Used by `/review` (Step 1) and the router's Step 0.
+description: Checks whether a PR is worth running /review on — closed, merged, trivial, or already reviewed since its last commit. Used by `/review` (Step 1).
 tools: Bash(gh:*), Bash(git:*), Read
 disallowedTools: ["mcp__*", Edit, Write, NotebookEdit]
 model: haiku
