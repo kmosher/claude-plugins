@@ -1,0 +1,42 @@
+# The every-commit graph: cheap readers for the easy bugs and inconsistencies, precision over recall.
+[defaults]
+provider = "claude"
+model = "sonnet"
+tools = ["Bash", "Read", "Grep", "Glob"]
+timeout = 1800
+conventions = "inline"
+
+[[node]]
+name = "lint"
+kind = "mechanical"
+provider = "command"
+command = ["mechanical/changed-lint"]
+timeout = 600
+
+[[node]]
+name = "code-resolve"
+kind = "generator"
+model = "sonnet"
+system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-code/SKILL.md", "code-resolve-addendum.md"]
+
+[[node]]
+name = "compliance"
+kind = "generator"
+model = "haiku"
+system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-code/SKILL.md", "compliance-addendum.md"]
+
+[[node]]
+name = "auditor"
+kind = "critic"
+model = "haiku"
+effort = "medium"
+needs = ["code-resolve", "compliance"]
+per_need = true
+system_prompt = ["auditor.md"]
+
+[[node]]
+name = "dedupe"
+kind = "merger"
+model = "haiku"
+tools = []
+system_prompt = ["merger.md"]
