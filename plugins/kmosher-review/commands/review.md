@@ -1,6 +1,6 @@
 ---
 allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(/opt/metawork/bin/review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
-description: Code review of the current change, run by the deterministic `review-run` harness — lenses, auditor, severity-sorted report, capture bundle. Offers to post the report to the PR.
+description: Code review of the current change, run by the deterministic `review-run` harness — lenses, auditor, severity-sorted report, capture bundle. Posts the report to the user's own PR, offers to on anyone else's.
 disable-model-invocation: false
 ---
 
@@ -44,7 +44,8 @@ Run in parallel, from the repo root (`git rev-parse --show-toplevel`):
 - `git rev-parse --abbrev-ref HEAD` — branch
 - `git status --porcelain` — empty means a clean tree
 - `git diff --stat <base>` — size and files touched
-- `gh pr view --json title,body,number,state` — best effort; no PR is fine
+- `gh pr view --json title,body,number,state,author` — best effort; no PR is fine
+- `gh api user --jq .login` — who is posting; Step 5 compares it with the PR author
 - `gh repo view --json nameWithOwner`
 
 If `$ARGUMENTS` contains `since <sha>`, use that SHA as the base instead of the merge-base.
@@ -91,7 +92,7 @@ End with one line, `run captured to <path>`, taken from the `bundle:` line exact
 
 Skip the offer if `$ARGUMENTS` contains `local`, `no post` or `don't post`; if Step 2 found no PR; or if the report has zero findings.
 
-Otherwise ask once: `Post this review as a comment on PR #<num>? (yes / no)`, unless the user has already said they want it posted. Posting is visible to others; never post without a yes.
+If the PR's `author.login` equals the `gh api user` login from Step 2, post without asking: the user is commenting on their own PR, and the question is noise. Otherwise ask once: `Post this review as a comment on PR #<num>? (yes / no)`, unless the user has already said they want it posted. Posting on someone else's PR is visible to them; never do it without a yes.
 
 On yes, write the report to `<tmp>/review-comment.md` with two changes, then `gh pr comment <num> --body-file <tmp>/review-comment.md`:
 
