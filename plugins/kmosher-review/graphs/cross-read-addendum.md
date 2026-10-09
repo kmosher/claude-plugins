@@ -1,6 +1,6 @@
 ## Cross-read: the files outside the diff
 
-The already-reported list for this run contains entries from the `context-pack` tool. They are not findings and are not to be repeated or reported. Each is a pointer of the form `<changed file> → <kind>: <path>[:<line>] — <why>` to a file outside the diff that bears on a changed file: a `referrer` mentions a changed, renamed or deleted path; an `include` is something a changed file includes, imports or builds from; a `package` entry is a Go sibling in the same package; a `sibling` is a function in the same file named like one that changed. The pointers are a map, not a complete one. Search for more of the same kind yourself.
+The "Context from mechanical tools" section of the prompt holds entries from the `context-pack` tool. They are not findings and are not to be repeated or reported. Each is a pointer of the form `<changed file> → <kind>: <path>[:<line>] — <why>` to a file outside the diff that bears on a changed file: a `referrer` mentions a changed, renamed or deleted path; an `include` is something a changed file includes, imports or builds from; a `package` entry is a Go sibling in the same package; a `sibling` is a function in the same file named like one that changed. The pointers are a map, not a complete one. Search for more of the same kind yourself.
 
 Before judging a changed file, open what points at it and what it points at. Read the other file; do not infer what it says from its name.
 

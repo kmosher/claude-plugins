@@ -4,8 +4,8 @@ diff that the changed files depend on or are depended on by, so a lens can
 check a claim against the file it is about instead of trusting it.
 
 stdin is the mechanical contract (JSON; see docs/review-harness.md in
-metawork), stdout is {"diagnostics": [...], "triggers": []}. Each diagnostic is
-one pointer, never file contents:
+metawork), stdout is {"diagnostics": [], "context": [...], "triggers": []}. Each
+context line is one pointer, never file contents:
 
     <changed file> -> <kind>: <path>[:<line>] -- <why>
 
@@ -371,18 +371,20 @@ def main():
             except Exception as e:
                 print(f"context-pack: {new}: {e}", file=sys.stderr)
     items.sort(key=lambda it: it[0])  # stable: priority, then discovery order
-    seen, diags = set(), []
+    seen, lines = set(), []
     for pri, changed, kind, ptr, why in items:
-        msg = f"→ {kind}: {ptr} — {why}"[:240]
+        msg = f"{changed} → {kind}: {ptr} — {why}"[:280]
         if (changed, kind, ptr) in seen and ptr != "...":
             continue
         seen.add((changed, kind, ptr))
-        diags.append({"tool": "context-pack", "file": changed, "line": None, "message": msg})
-    if len(diags) > MAX_ITEMS:
-        extra = len(diags) - (MAX_ITEMS - 1)
-        diags = diags[:MAX_ITEMS - 1]
-        diags.append({"tool": "context-pack", "file": None, "line": None, "message": f"→ {extra} lower-priority pointers omitted"})
-    json.dump({"diagnostics": diags, "triggers": []}, sys.stdout)
+        lines.append({"tool": "context-pack", "message": msg})
+    if len(lines) > MAX_ITEMS:
+        extra = len(lines) - (MAX_ITEMS - 1)
+        lines = lines[:MAX_ITEMS - 1]
+        lines.append({"tool": "context-pack", "message": f"{extra} lower-priority pointers omitted"})
+    # The context channel renders ahead of the diff as "open these before judging"; the
+    # diagnostics channel would file the same lines under "already reported" and lose them.
+    json.dump({"diagnostics": [], "context": lines, "triggers": []}, sys.stdout)
 
 
 if __name__ == "__main__":
