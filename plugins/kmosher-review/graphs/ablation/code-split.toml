@@ -72,7 +72,8 @@ system_prompt = ["../generator-preamble.md", "../../skills/SHARED_CONVENTIONS.md
 [[node]]
 name = "auditor"
 kind = "critic"
-effort = "high"
+model = "haiku"
+effort = "medium"
 needs = ["code-trace", "code-resolve", "legibility", "compatibility", "releng", "agent-skills"]
 per_need = true
 system_prompt = ["../auditor.md"]

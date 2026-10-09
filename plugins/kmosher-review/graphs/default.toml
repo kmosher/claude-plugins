@@ -63,10 +63,12 @@ kind = "generator"
 effort = "high"
 system_prompt = ["generator-preamble.md", "../skills/SHARED_CONVENTIONS.md", "../skills/review-legibility/SKILL.md", "legibility-addendum.md"]
 
+# Haiku at medium audits as fast as Opus with the same verdict mix, at a fraction of the cost (bench, Oct 2026).
 [[node]]
 name = "auditor"
 kind = "critic"
-effort = "high"
+model = "haiku"
+effort = "medium"
 needs = ["code", "legibility", "compatibility", "releng", "agent-skills"]
 per_need = true
 system_prompt = ["auditor.md"]
