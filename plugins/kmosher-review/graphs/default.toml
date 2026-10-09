@@ -3,7 +3,9 @@ provider = "claude"
 model = "opus"
 tools = ["Bash", "Read", "Grep", "Glob"]
 timeout = 1800
-conventions = "inline"
+# Inlined conventions on every lens bought no hits over listing them; inlining them on the code
+# lens alone is a minute faster and a tenth cheaper at the same hits (bench, Oct 2026).
+conventions = "list"
 
 [triggers]
 ddl = { touches = ["**/migrations/**", "**/*.sql", "**/schema/*.go"] }
@@ -37,6 +39,7 @@ agent-skills = { touches = [
 name = "code"
 kind = "generator"
 effort = "high"
+conventions = "inline"
 system_prompt = ["generator-preamble.md", "../lenses/SHARED_CONVENTIONS.md", "../lenses/review-code/SKILL.md"]
 
 [[node]]

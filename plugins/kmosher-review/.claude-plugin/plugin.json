@@ -1,7 +1,7 @@
 {
   "name": "kmosher-review",
   "displayName": "kmosher-review",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Multi-lens code review for Claude Code: correctness, legibility, compatibility, release-engineering safety, and agent-skill authoring. Run by the review-run harness via /review.",
   "author": {
     "name": "Keith Mosher"
