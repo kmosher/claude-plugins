@@ -953,7 +953,8 @@ def registry_latest(dep, cwd):
 
 
 def github_releases(slug, lo, hi):
-    """Markdown of the releases of a GitHub repo whose tag is in (lo, hi], newest first; "" if none."""
+    """Markdown of the releases of a GitHub repo whose tag is in (lo, hi], oldest first so the 40 KB cap
+    drops the releases past the new pin rather than the ones between old and new; "" if none."""
     url = f"repos/{slug}/releases?per_page=60"
     try:
         raw = fetch_cmd(["gh", "api", url])
@@ -964,7 +965,7 @@ def github_releases(slug, lo, hi):
         k = vkey(r.get("tag_name", ""))
         if k and not r.get("draft") and (lo is None or k > lo) and (hi is None or k <= hi):
             rels.append((k, r))
-    rels.sort(key=lambda kr: kr[0], reverse=True)
+    rels.sort(key=lambda kr: kr[0])
     return "".join(f"# {r['tag_name']} ({str(r.get('published_at') or '')[:10]})\n\n{(r.get('body') or '').strip()}\n\n"
                    for _, r in rels)
 
