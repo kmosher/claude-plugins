@@ -18,9 +18,12 @@ for issues and PRs named in the added lines, the commit messages or the PR body,
 `dependency <import> → <dir>` for modules newly imported, and `precedent for
 <call>: <path:line>, ...` for qualified calls newly written. `upstream <pkg> <old>→<new> (latest <v>): <path>` for the dependency
 bumps and additions in the diff (go.mod, package.json and its lockfiles, Cargo.toml, and imports above):
-release notes between the versions, fetched with go, gh and curl into <run output dir>/upstream/<pkg>/ (the
-directory holding the saved diff; a scratch directory if there is none), 12 s in all and 3 s a call, with
+release notes between the versions, fetched with go, gh and curl into <out>/upstream/<pkg>/ (`out` is the
+contract's per-node directory, kept with the bundle; absent from an older harness, the directory holding the
+saved diff; a scratch directory if neither is writable), 12 s in all and 3 s a call, with
 `upstream <pkg>: unavailable (<why>)` on any failure and a diagnostic when the pin is not the latest.
+The contract also carries `pr_number` (int or null) and `pr_body` (string or null); null means unknown, not
+empty, and the citations stage then falls back to REVIEW_PR_NUMBER / `gh pr view` and REVIEW_PR_BODY / pr-body.md.
 `--self-test` runs the regexes over fixtures and the upstream stage over a stubbed network. The whole output is capped at MAX_ITEMS. Any error yields fewer items, or none;
 this node never fails the run.
 """
@@ -440,8 +443,10 @@ def find_citations(text):
 
 
 def pr_body(ws, contract):
-    """The PR body if the harness leaves one: REVIEW_PR_BODY (a file path, else the text itself),
-    or a pr-body.md in the workspace or beside the saved diff."""
+    """The PR body: the contract's pr_body when it is a string (null means unknown), else
+    REVIEW_PR_BODY (a file path, else the text itself), or a pr-body.md in the workspace or beside the saved diff."""
+    if isinstance(contract.get("pr_body"), str):
+        return contract["pr_body"]
     env = os.environ.get("REVIEW_PR_BODY", "")
     cands = [env] if env else []
     cands.append(os.path.join(ws, "pr-body.md"))
@@ -508,7 +513,12 @@ def citation_items(ws, base, head, contract, text):
     if not distinct:
         return []
     gh = Gh(ws)
-    own = os.environ.get("REVIEW_PR_NUMBER", "").strip().lstrip("#")
+    own = ""
+    pn = contract.get("pr_number")
+    if isinstance(pn, int) and not isinstance(pn, bool) and pn > 0:
+        own = str(pn)
+    if not own:
+        own = os.environ.get("REVIEW_PR_NUMBER", "").strip().lstrip("#")
     if not own.isdigit():
         out = gh.run("pr", "view", "--json", "number")
         try:
@@ -1053,8 +1063,8 @@ def resolve_upstream(dep, ws, out_dir, scratch_note):
 
 
 def upstream_stage(ws, base, head, contract, text):
-    """(context items, diagnostics). Notes land in <run output dir>/upstream/<pkg>/ — the directory
-    holding the saved diff — or a scratch directory when the harness gives none."""
+    """(context items, diagnostics). Notes land in <out>/upstream/<pkg>/ — the contract's per-node
+    out directory, else the directory holding the saved diff — or a scratch directory when neither is writable."""
     global UPSTREAM_END
     by_file = diff_by_file(text)
     deps = dependency_changes(by_file, lambda p: show_rev(ws, head, p) if head else _read(ws, p),
@@ -1068,10 +1078,15 @@ def upstream_stage(ws, base, head, contract, text):
     if not deps:
         return [], []
     out_dir, note = None, ""
+    cands = []
+    if isinstance(contract.get("out"), str) and contract["out"]:
+        cands.append(contract["out"])
     if contract.get("diff"):
-        cand = os.path.dirname(contract["diff"])
+        cands.append(os.path.dirname(contract["diff"]))
+    for cand in cands:
         if os.path.isdir(cand) and os.access(cand, os.W_OK):
             out_dir = cand
+            break
     if not out_dir:
         import tempfile
         out_dir = tempfile.mkdtemp(prefix="review-upstream-")
@@ -1168,6 +1183,15 @@ def upstream_self_test():
             assert msgs["golang.org/x/sys"].startswith("upstream golang.org/x/sys: unavailable (") , msgs
             assert diags == [{"tool": "upstream", "file": "go.mod", "line": 5,
                               "message": "github.com/stretchr/testify is pinned at v1.9.0; the latest release is v1.10.0"}], diags
+            # out set: files land there, not beside the diff
+            od = os.path.join(out, "node-out")
+            os.makedirs(od)
+            items, _ = upstream_stage(out, "", "", {"out": od, "diff": os.path.join(out, "diff.patch")}, pkgjson)
+            lp2 = os.path.join(od, "upstream", "left-pad", "releases.md")
+            assert items[0][4] == f"upstream left-pad added at 1.3.0 (latest 1.3.0): {lp2}" and os.path.isfile(lp2), items
+            # PR fields: contract wins; null falls through
+            assert pr_body(out, {"pr_body": "fixes #7"}) == "fixes #7" and pr_body(out, {"pr_body": ""}) == ""
+            assert pr_body(out, {"pr_body": None}) == ""
             # no output directory from the harness: a scratch directory, said so in the pointer
             items, _ = upstream_stage(out, "", "", {}, pkgjson)
             assert "scratch dir" in items[0][4] and "review-upstream-" in items[0][4], items
