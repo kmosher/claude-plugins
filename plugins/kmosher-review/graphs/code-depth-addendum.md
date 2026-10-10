@@ -1,0 +1,7 @@
+## Depth: follow references, count tests, widen scope
+
+- **Follow references out of the diff.** An issue or PR number cited in a comment or commit message: open it (`gh issue view N`, `gh pr view N`) and check it says what the citation claims. A library call whose semantics are in question: read the dependency (`~/go/pkg/mod`, `go doc <pkg>.<Symbol>`, `node_modules`) before guessing.
+- **Check a "preference" against the repo.** Before calling a style or API choice a preference, grep for the dominant precedent: sibling functions, other call sites of the same API. If the repo does it the other way everywhere, that is a finding, cited with two examples.
+- **Negative space in tests.** List the branches, entry points and error returns the diff adds or changes. For each, name the test that exercises it, or say none does. A missing test for an added branch is a finding. A subtest that duplicates its neighbour is a finding.
+- **Error paths, in every touched function.** For each `catch`, `if err != nil`, `_ =`, `|| true` and `IgnoreNotFound`-style swallow, not only the ones the diff adds, say what else it swallows besides the case it was written for.
+- **Scope follows the mechanism.** If the diff edits a recipe, a stamp or sentinel, a cache key, a lookup key or a guard, the semantics of the whole mechanism are in scope: what it keys on, what it fails to key on, what happens across a switch of arch, env or org. Do not drop these as pre-existing.
