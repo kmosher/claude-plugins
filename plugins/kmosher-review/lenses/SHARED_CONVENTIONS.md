@@ -47,6 +47,8 @@ Every finding has these fields:
 | `description` | string | 1–3 sentences. What's wrong, concretely. |
 | `why_it_matters` | string | 1–2 sentences. The real-world bug/regression this would cause. |
 | `recommendation` | string | 1–2 sentences, or a fenced ```suggestion``` block when ≤ 5 lines. |
+| `invariant` | string | One sentence: the property that should hold and is violated at the cited site. For bugs, the broken guarantee ("every error from `fetchStack` reaches the caller; this branch swallows it"). For legibility, compatibility and releng findings, the property the finding protects ("a reader can tell what `n` counts from its name"; "a v1 client still parses this response"). Required, non-empty. |
+| `verify` | string | How an implementer confirms the fix: an existing test to run (named), a test to write (what it asserts; it must fail before the fix and pass after), a command to run, or the literal `by inspection` when no automated check is sensible. Required, never empty. |
 
 Lens skills may add lens-specific fields (e.g. `heuristic_number` for `review-legibility`, `deploy_ordering` for `review-compatibility`). Document them in the lens's Output Format section.
 
@@ -94,3 +96,5 @@ Two things follow from this, and they are the whole reason the rule can be state
 - **Trim on truth, not on volume.** Don't report a finding you don't believe: state confidence honestly, and if you couldn't establish the claim against actual code, say `low` rather than dropping it. But never drop a finding you *do* believe because the list is getting long. A long list of real findings is a correct result, and "nothing further surfaced" is also a correct result — report whichever one is true.
 
 Padding is still forbidden. Reporting everything real is not the same as manufacturing filler to hit a number; there is no number.
+
+A finding is a brief for an implementing agent, not prose for a human: the implementer applies the recommendation and then runs `verify`. Prefer a `verify` that fails on the current code; a finding whose fix cannot be observed is usually a finding that should have been `low` confidence. A low-confidence P1 is the dangerous object, because an implementer will act on it. When confidence is below `high`, say in `verify` what to check before touching the code.

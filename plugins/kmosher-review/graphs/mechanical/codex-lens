@@ -36,6 +36,10 @@ schema=$(jq -c '.schema' <<<"$envelope")
 cat >"$tmp/prompt" <<PROMPT
 $prompt
 
+Each finding must also carry two non-empty string fields:
+- invariant: one sentence, the property that should hold and is violated at the cited site (for a bug, the broken guarantee).
+- verify: how an implementer confirms the fix: a named existing test to run, a test to write (what it asserts; it fails before the fix and passes after), a command, or the literal "by inspection" when no automated check is sensible.
+
 Answer with only a single JSON object matching this JSON Schema, with no prose and no code fence:
 $schema
 PROMPT
@@ -69,7 +73,9 @@ jq '
           category: ($f.category | text),
           description: ($f.description | text),
           why_it_matters: ($f.why_it_matters | text),
-          recommendation: ($f.recommendation | text)
+          recommendation: ($f.recommendation | text),
+          invariant: (if ($f.invariant | text) != "" then $f.invariant else ($f.why_it_matters | text) end),
+          verify: (if ($f.verify | text) != "" then $f.verify else "by inspection" end)
         })
       | if .file == null or .line == null then .confidence = "low" else . end
     ],

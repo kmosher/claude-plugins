@@ -68,7 +68,10 @@ Numbered findings. Each:
 - **File:line ref**
 - **What's wrong** (1–3 sentences, concrete)
 - **Bug it would cause** in a real user scenario
+- **Invariant**: one sentence, the property that should hold and is violated here
 - **Proposed fix** (1–3 sentences)
+- **Verify**: a named test to run, a test to write (fails before the fix,
+  passes after), a command, or `by inspection`; never empty
 - **Confidence**: low (speculated from naming) / medium (read related code,
   didn't fully verify the failure path) / high (read the implementation and
   traced an end-to-end scenario demonstrating the bug)
