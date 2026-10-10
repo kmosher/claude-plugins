@@ -13,13 +13,18 @@ kinds are referrer (a file elsewhere that mentions a changed, renamed or
 deleted path), include (a Makefile include, a relative TS/JS import, a
 Dockerfile build input), package (a Go sibling in the same package) and
 sibling (a function in the same file with a similar name to a changed one).
-The whole output is capped at MAX_ITEMS. Any error yields fewer items, or none;
+Three further sources emit free-form lines instead: `cites #N: "<title>" (<state>)`
+for issues and PRs named in the added lines, the commit messages or the PR body,
+`dependency <import> → <dir>` for modules newly imported, and `precedent for
+<call>: <path:line>, ...` for qualified calls newly written. `--self-test` runs
+the regexes over fixtures. The whole output is capped at MAX_ITEMS. Any error yields fewer items, or none;
 this node never fails the run.
 """
 
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -348,7 +353,346 @@ def referrer_items(repo, changes):
     return items
 
 
+# --- references followed out of the diff: citations, precedent, dependency source ---
+
+CITE_BUDGET = 4.0      # seconds of the deadline the citation lookups may spend
+MAX_CITES = 8
+MAX_PRECEDENT_IDENTS = 10
+MAX_SITES = 3
+MAX_GO_MODULES = 5
+MAX_TS_PACKAGES = 5
+GH_TIMEOUT = 3.0
+GO_LIST_TIMEOUT = 2.0
+START = time.monotonic()
+
+CITE_PATTERNS = [
+    re.compile(r"https?://github\.com/([\w.-]+/[\w.-]+)/(?:issues|pull)/(\d{1,6})\b"),
+    re.compile(r"\b(?:PR|pull request|issue)s?\s+#?(\d{1,6})\b", re.I),
+    re.compile(r"(?<![\w&/#.-])#(\d{1,5})\b"),
+]
+GO_QUALIFIED = re.compile(r"(?<![\w.])([A-Za-z_]\w*\.[A-Z]\w*)\(")
+TS_QUALIFIED = re.compile(r"(?<![\w.$])([a-z]\w*\.[a-z]\w*)\(")
+GO_IMPORT = re.compile(r'^\s*(?:import\s+)?(?:[\w._]+\s+)?"([^"\s]+)"\s*(?://.*)?$')
+TS_IMPORT = re.compile(r"""(?:\bfrom\s+|\brequire\(\s*|\bimport\(\s*|^\s*import\s+)['"]([^'".][^'"]*)['"]""")
+# Receivers and methods that are the standard library or a test harness: a precedent for them teaches nothing.
+NOISE_RECEIVERS = {
+    "fmt", "errors", "strings", "strconv", "os", "io", "ioutil", "bytes", "sort", "time", "sync", "context",
+    "log", "filepath", "path", "json", "reflect", "regexp", "bufio", "atomic", "slog", "t", "b", "require",
+    "assert", "console", "this", "self", "super", "process", "window", "document", "Math", "expect", "JSON",
+    "Object", "Array", "Promise", "err", "ctx", "wg", "mu", "cmd",
+}
+NOISE_METHODS = {
+    "Error", "String", "Close", "Done", "Lock", "Unlock", "RLock", "RUnlock", "Add", "Wait", "Helper", "Run",
+    "Fatal", "Fatalf", "Errorf", "Log", "Logf", "Skip", "Skipf", "Parallel", "Cleanup", "Unwrap", "Is", "As",
+    "Len", "Get", "Set", "Sprintf", "Printf", "Println", "Equal", "NoError", "Nil", "True", "False",
+    "log", "map", "filter", "forEach", "push", "join", "split", "then", "catch", "map", "includes", "slice",
+    "toString", "keys", "values", "entries", "trim", "replace", "test", "has", "get", "set", "add", "delete",
+}
+NODE_BUILTINS = {
+    "fs", "path", "os", "util", "http", "https", "url", "stream", "events", "crypto", "child_process", "assert",
+    "buffer", "zlib", "net", "tls", "dns", "readline", "process", "module", "worker_threads", "timers", "vm",
+}
+
+
+def diff_text(ws, base, head, contract):
+    p = contract.get("diff")
+    if p:
+        try:
+            with open(p, errors="replace") as fh:
+                text = fh.read()
+            if text:
+                return text
+        except Exception:
+            pass
+    return git(ws, "diff", "-U0", "-M", base, head) if base and head else ""
+
+
+def added_content(text):
+    """[(new path, line text)] for every added line of a unified diff."""
+    out, path = [], None
+    for line in text.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            path = path[2:] if path.startswith("b/") else (None if path == "/dev/null" else path)
+        elif line.startswith("+") and path:
+            out.append((path, line[1:]))
+    return out
+
+
+def find_citations(text):
+    """Ordered distinct (repo or None, number) cited in text."""
+    found = []
+    for m in CITE_PATTERNS[0].finditer(text):
+        found.append((m.group(1), int(m.group(2))))
+    for pat in CITE_PATTERNS[1:]:
+        for m in pat.finditer(text):
+            found.append((None, int(m.group(1))))
+    seen, out = set(), []
+    for ref in found:
+        if ref[1] > 0 and ref not in seen:
+            seen.add(ref)
+            out.append(ref)
+    return out
+
+
+def pr_body(ws, contract):
+    """The PR body if the harness leaves one: REVIEW_PR_BODY (a file path, else the text itself),
+    or a pr-body.md in the workspace or beside the saved diff."""
+    env = os.environ.get("REVIEW_PR_BODY", "")
+    cands = [env] if env else []
+    cands.append(os.path.join(ws, "pr-body.md"))
+    if contract.get("diff"):
+        cands.append(os.path.join(os.path.dirname(contract["diff"]), "pr-body.md"))
+    for c in cands:
+        if os.path.isfile(c):
+            try:
+                with open(c, errors="replace") as fh:
+                    return fh.read()
+            except Exception:
+                continue
+    return env if env and not os.path.exists(env) else ""
+
+
+class Gh:
+    """gh with a per-call timeout; dies quietly when gh is missing, unauthenticated or too slow."""
+
+    def __init__(self, ws):
+        self.ws = ws
+        self.dead = shutil.which("gh") is None
+
+    def run(self, *args):
+        if self.dead or time.monotonic() > DEADLINE:
+            return None
+        try:
+            r = subprocess.run(["gh", *args], cwd=self.ws, capture_output=True, text=True, errors="replace",
+                               timeout=min(GH_TIMEOUT, remaining()))
+        except Exception:
+            self.dead = True
+            return None
+        if r.returncode != 0:
+            err = r.stderr.lower()
+            if "auth" in err or "login" in err or "gh_token" in err:
+                self.dead = True
+            return None
+        return r.stdout
+
+    def lookup(self, repo, n):
+        extra = ["--repo", repo] if repo else []
+        for kind in ("issue", "pr"):
+            out = self.run(kind, "view", str(n), "--json", "number,title,state,url", *extra)
+            if out:
+                try:
+                    return json.loads(out)
+                except ValueError:
+                    continue
+        return None
+
+
+def citation_items(ws, base, head, contract, text):
+    refs = []
+    for path, line in added_content(text):
+        if not skipped(path):
+            refs += find_citations(line)
+    if base and head:
+        refs += find_citations(git(ws, "log", "--format=%B", f"{base}..{head}"))
+    refs += find_citations(pr_body(ws, contract))
+    seen, distinct = set(), []
+    for ref in refs:
+        if ref not in seen:
+            seen.add(ref)
+            distinct.append(ref)
+    if not distinct:
+        return []
+    gh = Gh(ws)
+    own = os.environ.get("REVIEW_PR_NUMBER", "").strip().lstrip("#")
+    if not own.isdigit():
+        out = gh.run("pr", "view", "--json", "number")
+        try:
+            own = str(json.loads(out)["number"]) if out else ""
+        except Exception:
+            own = ""
+    items = []
+    for repo, n in distinct:
+        if len(items) >= MAX_CITES or time.monotonic() - START > CITE_BUDGET:
+            break
+        if repo is None and str(n) == own:
+            continue
+        info = gh.lookup(repo, n)
+        if gh.dead and not info:
+            break
+        if not info:
+            continue
+        name = f"{repo}#{n}" if repo else f"#{n}"
+        title = " ".join(str(info.get("title", "")).split())[:90]
+        items.append((-2, None, None, f"cite:{name}",
+                      f'cites {name}: "{title}" ({str(info.get("state", "?")).lower()}) — '
+                      f"check the citation says what the comment claims"))
+    return items
+
+
+def qualified_calls(text):
+    """Counter of qualified call identifiers in added lines, by language of the file."""
+    from collections import Counter
+    counts = Counter()
+    for path, line in added_content(text):
+        ext = os.path.splitext(path)[1].lower()
+        if skipped(path) or line.lstrip().startswith(("//", "#", "*", "/*")):
+            continue
+        if ext == ".go":
+            pat = GO_QUALIFIED
+        elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+            pat = TS_QUALIFIED
+        else:
+            continue
+        for ident in pat.findall(line):
+            recv, meth = ident.split(".")
+            if recv in NOISE_RECEIVERS or meth in NOISE_METHODS:
+                continue
+            counts[(ident, ext == ".go")] += 1
+    return counts
+
+
+def precedent_items(repo, changes, text):
+    counts = qualified_calls(text)
+    if not counts:
+        return []
+    excludes = [f":(exclude,literal){new}" for _, _, new in changes]
+    excludes += [":(exclude,glob)**/%s/**" % d for d in SKIP_DIRS]
+    excludes += [":(exclude,glob)**/%s" % f for f in SKIP_FILES]
+    items = []
+    for (ident, is_go), _ in counts.most_common(MAX_PRECEDENT_IDENTS):
+        globs = ["*.go"] if is_go else ["*.ts", "*.tsx", "*.js", "*.jsx", "*.mjs"]
+        args = ["grep", "-n", "-I", "-F", "-e", ident + "("]
+        if repo.rev:
+            args.append(repo.rev)
+        out = git(repo.ws, *args, "--", *globs, *excludes)
+        prefix = repo.rev + ":" if repo.rev else ""
+        sites, files = [], set()
+        for row in out.splitlines():
+            if prefix and row.startswith(prefix):
+                row = row[len(prefix):]
+            parts = row.split(":", 2)
+            if len(parts) < 3 or not parts[1].isdigit() or parts[0] in files:
+                continue
+            files.add(parts[0])
+            sites.append(f"{parts[0]}:{parts[1]}")
+        sites.sort(key=lambda s: bool(re.search(r"_test\.go|\.test\.|\.spec\.|/tests?/", s.split(":")[0])))
+        if sites:
+            items.append((0, None, None, f"precedent:{ident}",
+                          f"precedent for {ident}: {', '.join(sites[:MAX_SITES])} — compare argument order and "
+                          f"shape before calling the diff's use a preference"))
+    return items
+
+
+def go_module_for(repo, start_dir, imp):
+    """(module path, go.mod dir, version, own module?) for the longest go.mod requirement prefixing imp."""
+    d = start_dir
+    while True:
+        gm = os.path.join(d, "go.mod") if d else "go.mod"
+        if gm in repo.tree:
+            break
+        if not d:
+            return None
+        d = os.path.dirname(d)
+    text = repo.read(gm)
+    own = re.search(r"^module\s+(\S+)", text, re.M)
+    if own and (imp == own.group(1).strip('"') or imp.startswith(own.group(1).strip('"') + "/")):
+        return None
+    best = None
+    for m in re.finditer(r"^\s*(?:require\s+)?([\w.~/-]+\.[\w.~/-]+)\s+(v[\w.+-]+)", text, re.M):
+        mod, ver = m.group(1), m.group(2)
+        if (imp == mod or imp.startswith(mod + "/")) and (best is None or len(mod) > len(best[0])):
+            best = (mod, d, ver)
+    return best
+
+
+def module_dir(ws, gomod_dir, mod, ver):
+    cwd = os.path.join(ws, gomod_dir) if gomod_dir else ws
+    env = dict(os.environ, GOFLAGS="-mod=mod", GOPROXY="off")
+    try:
+        r = subprocess.run(["go", "list", "-m", "-f", "{{.Dir}}", mod], cwd=cwd, env=env, capture_output=True,
+                           text=True, timeout=min(GO_LIST_TIMEOUT, remaining()))
+        out = r.stdout.strip()
+        if r.returncode == 0 and out and os.path.isdir(out):
+            return out
+    except Exception:
+        pass
+    root = os.environ.get("GOMODCACHE") or os.path.join(os.path.expanduser("~"), "go", "pkg", "mod")
+    esc = re.sub(r"[A-Z]", lambda m: "!" + m.group(0).lower(), mod)
+    cand = os.path.join(root, f"{esc}@{ver}")
+    return cand if os.path.isdir(cand) else None
+
+
+def dependency_items(repo, changes, text):
+    items, go_seen, ts_seen = [], set(), set()
+    for path, line in added_content(text):
+        if skipped(path):
+            continue
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".go" and len(go_seen) < MAX_GO_MODULES:
+            m = GO_IMPORT.match(line)
+            if not m or "." not in m.group(1).split("/")[0] or m.group(1) in go_seen:
+                continue
+            imp = m.group(1)
+            hit = go_module_for(repo, os.path.dirname(path), imp)
+            if not hit:
+                continue
+            go_seen.add(imp)
+            mod, gomod_dir, ver = hit
+            mdir = module_dir(repo.ws, gomod_dir, mod, ver)
+            if not mdir:
+                continue
+            sub = imp[len(mod):].lstrip("/")
+            pdir = os.path.join(mdir, sub) if sub and os.path.isdir(os.path.join(mdir, sub)) else mdir
+            items.append((-1, None, None, f"dep:{imp}",
+                          f"dependency {imp} → {pdir} — read it before judging a call's semantics"))
+        elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs") and len(ts_seen) < MAX_TS_PACKAGES:
+            m = TS_IMPORT.search(line)
+            if not m or m.group(1).startswith("node:"):
+                continue
+            parts = m.group(1).split("/")
+            pkg = "/".join(parts[:2]) if parts[0].startswith("@") else parts[0]
+            if pkg in NODE_BUILTINS or pkg in ts_seen:
+                continue
+            d = os.path.dirname(path)
+            while True:
+                cand = os.path.join(repo.ws, d, "node_modules", pkg)
+                if os.path.isdir(cand):
+                    ts_seen.add(pkg)
+                    rel = os.path.normpath(os.path.join(d, "node_modules", pkg))
+                    items.append((-1, None, None, f"dep:{pkg}",
+                                  f"dependency {pkg} → {rel} — read it before judging a call's semantics"))
+                    break
+                if not d:
+                    break
+                d = os.path.dirname(d)
+    return items
+
+
+def self_test():
+    assert sorted(find_citations("fix for #123 and (#45), see PR 67, issue #8")) == [(None, 8), (None, 45), (None, 67), (None, 123)]
+    assert find_citations("color: #123456; &#39; a/b#7 x#9") == []
+    assert find_citations("https://github.com/pulumi/pulumi/pull/4242") == [("pulumi/pulumi", 4242)]
+    assert [n for _, n in find_citations("see https://github.com/o/r/issues/9 and #9")] == [9, 9]
+    assert GO_QUALIFIED.findall("x := pkg.Func(a) + a.b.Method(c) + obj.method(d) + fmt.Sprintf(") == ["pkg.Func", "fmt.Sprintf"]
+    assert TS_QUALIFIED.findall("client.fetchAll(x); this.y(); a.b.c(); JSON.parse(z); foo.Bar(q)") == ["client.fetchAll", "this.y"]
+    assert GO_IMPORT.match('\t"github.com/x/y/z"').group(1) == "github.com/x/y/z"
+    assert GO_IMPORT.match('\talias "github.com/x/y"').group(1) == "github.com/x/y"
+    assert GO_IMPORT.match('import "github.com/x/y"').group(1) == "github.com/x/y"
+    assert GO_IMPORT.match('\tfoo := "github.com/x/y"') is None
+    assert TS_IMPORT.search("import { a } from '@scope/pkg/sub';").group(1) == "@scope/pkg/sub"
+    assert TS_IMPORT.search("const x = require('lodash')").group(1) == "lodash"
+    assert TS_IMPORT.search("import x from './rel'") is None
+    c = qualified_calls("+++ b/a.go\n+\tv := store.Fetch(x)\n+\tfmt.Println(1)\n+\t// store.Skip(x)\n"
+                        "+++ b/a.ts\n+const r = api.getThing(1); api.getThing(2); console.log(r)\n+++ b/README.md\n+call a.Doc(x)\n")
+    assert dict(c) == {("store.Fetch", True): 1, ("api.getThing", False): 2}, dict(c)
+    assert added_content("+++ b/a.go\n+one\n-two\n+++ /dev/null\n+gone\n") == [("a.go", "one")]
+    print("context-pack self-test: ok")
+
+
 def main():
+    if "--self-test" in sys.argv:
+        return self_test()
     contract = json.load(sys.stdin)
     ws = contract["workspace"].rstrip("/")
     base, head = contract.get("base") or "", contract.get("head") or ""
@@ -370,10 +714,20 @@ def main():
                 items += fn()
             except Exception as e:
                 print(f"context-pack: {new}: {e}", file=sys.stderr)
+    # Citations, then dependency source, then precedent, each ahead of the structural pointers
+    # above them; every stage is time-boxed and silent on failure.
+    text = diff_text(ws, base, head, contract)
+    for fn in (lambda: citation_items(ws, base, head, contract, text),
+               lambda: dependency_items(repo, changes, text),
+               lambda: precedent_items(repo, changes, text)):
+        try:
+            items += fn()
+        except Exception as e:
+            print(f"context-pack: references: {e}", file=sys.stderr)
     items.sort(key=lambda it: it[0])  # stable: priority, then discovery order
     seen, lines = set(), []
     for pri, changed, kind, ptr, why in items:
-        msg = f"{changed} → {kind}: {ptr} — {why}"[:280]
+        msg = (why if kind is None else f"{changed} → {kind}: {ptr} — {why}")[:280]
         if (changed, kind, ptr) in seen and ptr != "...":
             continue
         seen.add((changed, kind, ptr))
