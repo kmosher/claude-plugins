@@ -16,8 +16,12 @@ sibling (a function in the same file with a similar name to a changed one).
 Three further sources emit free-form lines instead: `cites #N: "<title>" (<state>)`
 for issues and PRs named in the added lines, the commit messages or the PR body,
 `dependency <import> → <dir>` for modules newly imported, and `precedent for
-<call>: <path:line>, ...` for qualified calls newly written. `--self-test` runs
-the regexes over fixtures. The whole output is capped at MAX_ITEMS. Any error yields fewer items, or none;
+<call>: <path:line>, ...` for qualified calls newly written. `upstream <pkg> <old>→<new> (latest <v>): <path>` for the dependency
+bumps and additions in the diff (go.mod, package.json and its lockfiles, Cargo.toml, and imports above):
+release notes between the versions, fetched with go, gh and curl into <run output dir>/upstream/<pkg>/ (the
+directory holding the saved diff; a scratch directory if there is none), 12 s in all and 3 s a call, with
+`upstream <pkg>: unavailable (<why>)` on any failure and a diagnostic when the pin is not the latest.
+`--self-test` runs the regexes over fixtures and the upstream stage over a stubbed network. The whole output is capped at MAX_ITEMS. Any error yields fewer items, or none;
 this node never fails the run.
 """
 
@@ -623,6 +627,20 @@ def module_dir(ws, gomod_dir, mod, ver):
     return cand if os.path.isdir(cand) else None
 
 
+def ts_declared(repo, start_dir, pkg):
+    """The version a package.json at or above start_dir declares for pkg, else None."""
+    d = start_dir
+    while True:
+        pj = os.path.join(d, "package.json")
+        if pj in repo.tree:
+            v = spec_version(declared_npm(repo.read(pj)).get(pkg, ""))
+            if v:
+                return v
+        if not d:
+            return None
+        d = os.path.dirname(d)
+
+
 def dependency_items(repo, changes, text):
     items, go_seen, ts_seen = [], set(), set()
     for path, line in added_content(text):
@@ -639,6 +657,7 @@ def dependency_items(repo, changes, text):
                 continue
             go_seen.add(imp)
             mod, gomod_dir, ver = hit
+            IMPORTED.append(("go", mod, ver, gomod_dir))
             mdir = module_dir(repo.ws, gomod_dir, mod, ver)
             if not mdir:
                 continue
@@ -655,6 +674,9 @@ def dependency_items(repo, changes, text):
             if pkg in NODE_BUILTINS or pkg in ts_seen:
                 continue
             d = os.path.dirname(path)
+            declared = ts_declared(repo, d, pkg)
+            if declared:
+                IMPORTED.append(("npm", pkg, declared, ""))
             while True:
                 cand = os.path.join(repo.ws, d, "node_modules", pkg)
                 if os.path.isdir(cand):
@@ -667,6 +689,490 @@ def dependency_items(repo, changes, text):
                     break
                 d = os.path.dirname(d)
     return items
+
+
+# --- upstream: what the registries know about the dependencies the diff touches ---
+
+UPSTREAM_BUDGET = 12.0   # seconds for the whole stage
+FETCH_TIMEOUT = 3.0      # seconds for one network call
+MAX_UPSTREAM = 6
+MAX_NOTES_BYTES = 40 * 1024
+UA = "kmosher-review-upstream (https://github.com/kmosher/claude-plugins)"
+# Dependencies the dependency stage found in imports; it appends (ecosystem, name, version, go.mod dir).
+IMPORTED = []
+UPSTREAM_END = None
+
+
+class FetchError(Exception):
+    pass
+
+
+def fetch_cmd(argv, cwd=None, env=None, timeout=None):
+    """Stdout of a gh, curl or go call. Raises FetchError with a short reason; self-test replaces this."""
+    t = min(timeout or FETCH_TIMEOUT, FETCH_TIMEOUT)
+    if UPSTREAM_END is not None:
+        if UPSTREAM_END - time.monotonic() <= 0.1:
+            raise FetchError("stage budget spent")
+        t = min(t, UPSTREAM_END - time.monotonic())
+    try:
+        r = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, errors="replace", timeout=t)
+    except subprocess.TimeoutExpired:
+        raise FetchError(f"{argv[0]} timed out after {t:g}s")
+    except OSError as e:
+        raise FetchError(f"{argv[0]}: {e.strerror or e}")
+    if r.returncode != 0:
+        last = (r.stderr.strip().splitlines() or [f"exit {r.returncode}"])[-1]
+        raise FetchError(f"{argv[0]}: {last[:80]}")
+    return r.stdout
+
+
+def curl(url):
+    return fetch_cmd(["curl", "-sSfL", "--max-time", f"{FETCH_TIMEOUT:g}", "-A", UA, url])
+
+
+def show_rev(ws, rev, path):
+    """A file at a revision, "" when absent; independent of the stage deadlines above."""
+    if not rev:
+        return ""
+    try:
+        r = subprocess.run(["git", "-C", ws, "show", f"{rev}:{path}"], capture_output=True, text=True,
+                           errors="replace", timeout=2.0)
+    except Exception:
+        return ""
+    return r.stdout if r.returncode == 0 else ""
+
+
+SEMVER = re.compile(r"v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:[-+]([0-9A-Za-z.+-]+))?")
+
+
+def vkey(s):
+    """Sort key for a version or tag; a release sorts above its own prereleases. None if not a version."""
+    m = SEMVER.search(s or "")
+    if not m:
+        return None
+    a, b, c, pre = m.groups()
+    return (int(a), int(b or 0), int(c or 0), 0 if pre else 1, pre or "")
+
+
+def is_pseudo(v):
+    return bool(re.search(r"-\d{14}-[0-9a-f]{12}$", v or ""))
+
+
+def diff_by_file(text):
+    """{path: [(sign, new line number or None, text)]} for the +/- lines of a unified diff."""
+    out, path, n = {}, None, 0
+    for line in text.splitlines():
+        if line.startswith("+++ "):
+            path = line[4:].strip()
+            path = path[2:] if path.startswith("b/") else (None if path == "/dev/null" else path)
+        elif line.startswith("--- "):
+            continue
+        elif line.startswith("@@"):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", line)
+            n = int(m.group(1)) if m else 0
+        elif path and line.startswith("+"):
+            out.setdefault(path, []).append(("+", n, line[1:]))
+            n += 1
+        elif path and line.startswith("-"):
+            out.setdefault(path, []).append(("-", None, line[1:]))
+        elif path and line.startswith(" "):
+            n += 1
+    return out
+
+
+GOMOD_REQ = re.compile(r"^\s*(?:require\s+)?([\w.~/-]+\.[\w.~/-]+)\s+(v[\w.+-]+)(\s*//\s*indirect)?")
+JSON_DEP = re.compile(r'^\s*"([^"]+)"\s*:\s*"([^"]*)"')
+CARGO_DEP = re.compile(r'^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]+)"|\{[^}]*\bversion\s*=\s*"([^"]+)")')
+
+
+def spec_version(spec):
+    """The first concrete version in an npm or Cargo range, or None for tags, URLs and workspace refs."""
+    m = re.search(r"\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.-]+)?", spec or "")
+    return m.group(0) if m and not re.match(r"^(?:git|http|file|link|workspace|npm:)", spec) else None
+
+
+def lock_versions(path, text, names):
+    """{name: version} for names in a lockfile; package-lock.json, yarn.lock (v1) and pnpm-lock.yaml."""
+    out = {}
+    base = os.path.basename(path)
+    if base == "package-lock.json":
+        try:
+            pk = json.loads(text).get("packages") or {}
+        except ValueError:
+            return out
+        for n in names:
+            v = (pk.get(f"node_modules/{n}") or {}).get("version")
+            if v:
+                out[n] = v
+    elif base == "yarn.lock":
+        for m in re.finditer(r'^"?((?:@[^@\s"]+/)?[^@\s"]+)@[^\n]*:\n\s+version "?([^"\n]+)"?', text, re.M):
+            if m.group(1) in names:
+                out.setdefault(m.group(1), m.group(2))
+    elif base == "pnpm-lock.yaml":
+        for m in re.finditer(r"^\s+/?'?((?:@[^@\s']+/)?[^@\s']+)@(\d[^\s:'()]*)[^\n]*:\s*$", text, re.M):
+            if m.group(1) in names:
+                out.setdefault(m.group(1), m.group(2))
+    return out
+
+
+def declared_npm(text):
+    try:
+        j = json.loads(text)
+    except ValueError:
+        return {}
+    d = {}
+    for k in ("dependencies", "devDependencies", "optionalDependencies"):
+        d.update(j.get(k) or {})
+    return d
+
+
+def declared_cargo(text):
+    names = set()
+    sect = ""
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            sect = s
+            m = re.match(r"\[(?:[\w.-]+\.)?(?:dev-|build-)?dependencies\.([A-Za-z0-9_-]+)\]", s)
+            if m:
+                names.add(m.group(1))
+        elif re.search(r"dependencies\]$", sect):
+            m = CARGO_DEP.match(line)
+            if m:
+                names.add(m.group(1))
+    return names
+
+
+def dependency_changes(by_file, show_head, show_base):
+    """Dependency changes in a diff: dicts of eco, name, old, new, rank (0 bump, 1 add, 3 indirect), file, line."""
+    found = []
+    for path, rows in by_file.items():
+        base = os.path.basename(path)
+        d = os.path.dirname(path)
+        if base == "go.mod":
+            old = {}
+            for sign, _, t in rows:
+                m = GOMOD_REQ.match(t) if sign == "-" else None
+                if m:
+                    old[m.group(1)] = m.group(2)
+            for sign, ln, t in rows:
+                m = GOMOD_REQ.match(t) if sign == "+" else None
+                if not m or old.get(m.group(1)) == m.group(2):
+                    continue
+                indirect = bool(m.group(3))
+                o = old.get(m.group(1))
+                found.append(dict(eco="go", name=m.group(1), old=o, new=m.group(2), file=path, line=ln, gomod_dir=d,
+                                  rank=3 if indirect else (0 if o else 1)))
+        elif base == "package.json":
+            declared = declared_npm(show_head(path))
+            old = {}
+            for sign, _, t in rows:
+                m = JSON_DEP.match(t) if sign == "-" else None
+                if m:
+                    old[m.group(1)] = spec_version(m.group(2))
+            for sign, ln, t in rows:
+                m = JSON_DEP.match(t) if sign == "+" else None
+                if not m or m.group(1) not in declared:
+                    continue
+                new = spec_version(m.group(2))
+                if new and old.get(m.group(1)) != new:
+                    o = old.get(m.group(1))
+                    found.append(dict(eco="npm", name=m.group(1), old=o, new=new, file=path, line=ln, rank=0 if o else 1))
+        elif base == "Cargo.toml":
+            declared = declared_cargo(show_head(path))
+            old = {}
+            for sign, _, t in rows:
+                m = CARGO_DEP.match(t) if sign == "-" else None
+                if m:
+                    old[m.group(1)] = spec_version(m.group(2) or m.group(3))
+            for sign, ln, t in rows:
+                m = CARGO_DEP.match(t) if sign == "+" else None
+                if not m or m.group(1) not in declared:
+                    continue
+                new = spec_version(m.group(2) or m.group(3))
+                if new and old.get(m.group(1)) != new:
+                    o = old.get(m.group(1))
+                    found.append(dict(eco="cargo", name=m.group(1), old=o, new=new, file=path, line=ln, rank=0 if o else 1))
+        elif base in ("package-lock.json", "yarn.lock", "pnpm-lock.yaml"):
+            pj = os.path.join(d, "package.json")
+            names = set(declared_npm(show_head(pj)))
+            if not names:
+                continue
+            before, after = lock_versions(path, show_base(path), names), lock_versions(path, show_head(path), names)
+            for n, v in sorted(after.items()):
+                if before.get(n) and before[n] != v:
+                    found.append(dict(eco="npm", name=n, old=before[n], new=v, file=path, line=None, rank=0))
+    seen, out = set(), []
+    for f in sorted(found, key=lambda f: f["rank"]):  # stable: a package.json row beats its lockfile row
+        if (f["eco"], f["name"]) not in seen:
+            seen.add((f["eco"], f["name"]))
+            out.append(f)
+    return out
+
+
+def github_slug(s):
+    m = re.search(r"github\.com[/:]([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/#?].*)?$", s or "")
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def safe_name(name):
+    return re.sub(r"[^\w.@+-]", "_", name)
+
+
+def trim_changelog(text, lo, hi):
+    """Sections of a markdown changelog whose heading names a version in (lo, hi]; whole text if none parse."""
+    parts = re.split(r"(?m)^(?=#{1,3} )", text)
+    keep = []
+    for p in parts:
+        head = p.splitlines()[0] if p.strip() else ""
+        k = vkey(head) if head.startswith("#") else None
+        if k and (lo is None or k > lo) and (hi is None or k <= hi):
+            keep.append(p)
+    return "".join(keep) if keep else text
+
+
+def registry_latest(dep, cwd):
+    """(latest, repository slug or None, version list or None) from the ecosystem's registry."""
+    eco, name = dep["eco"], dep["name"]
+    if eco == "go":
+        env = dict(os.environ, GOFLAGS="-mod=mod", GOTOOLCHAIN="local", GOSUMDB="off")
+        out = fetch_cmd(["go", "list", "-m", "-versions", name], cwd=cwd, env=env)
+        vs = out.split()[1:]
+        stable = [v for v in vs if "-" not in v]
+        if not vs:
+            raise FetchError("go list: no versions")
+        return (stable or vs)[-1], github_slug(name), vs
+    if eco == "npm":
+        j = json.loads(curl(f"https://registry.npmjs.org/{name.replace('/', '%2F')}/latest"))
+        repo = j.get("repository")
+        return j["version"], github_slug(repo.get("url") if isinstance(repo, dict) else repo), None
+    j = json.loads(curl(f"https://crates.io/api/v1/crates/{name}"))
+    c = j.get("crate") or {}
+    vs = [v["num"] for v in (j.get("versions") or []) if not v.get("yanked")]
+    return c.get("max_stable_version") or c["newest_version"], github_slug(c.get("repository")), vs[::-1]
+
+
+def github_releases(slug, lo, hi):
+    """Markdown of the releases of a GitHub repo whose tag is in (lo, hi], newest first; "" if none."""
+    url = f"repos/{slug}/releases?per_page=60"
+    try:
+        raw = fetch_cmd(["gh", "api", url])
+    except FetchError:
+        raw = curl(f"https://api.github.com/{url}")
+    rels = []
+    for r in json.loads(raw):
+        k = vkey(r.get("tag_name", ""))
+        if k and not r.get("draft") and (lo is None or k > lo) and (hi is None or k <= hi):
+            rels.append((k, r))
+    rels.sort(key=lambda kr: kr[0], reverse=True)
+    return "".join(f"# {r['tag_name']} ({str(r.get('published_at') or '')[:10]})\n\n{(r.get('body') or '').strip()}\n\n"
+                   for _, r in rels)
+
+
+def local_changelog(dep, ws):
+    """The CHANGELOG* shipped in the module cache or node_modules copy, "" if there is none."""
+    root = None
+    if dep["eco"] == "go":
+        root = module_dir(ws, dep.get("gomod_dir", ""), dep["name"], dep["new"])
+    elif dep["eco"] == "npm":
+        d = dep["file"] and os.path.dirname(dep["file"])
+        while True:
+            cand = os.path.join(ws, d, "node_modules", dep["name"])
+            if os.path.isdir(cand):
+                root = cand
+                break
+            if not d:
+                break
+            d = os.path.dirname(d)
+    if root:
+        for f in sorted(os.listdir(root)):
+            if f.upper().startswith(("CHANGELOG", "CHANGES", "HISTORY")) and os.path.isfile(os.path.join(root, f)):
+                with open(os.path.join(root, f), errors="replace") as fh:
+                    return fh.read()
+    return ""
+
+
+def resolve_upstream(dep, ws, out_dir, scratch_note):
+    """Fetch and write the notes for one dependency; (context message, diagnostic or None)."""
+    name, new, old = dep["name"], dep["new"], dep.get("old")
+    try:
+        latest, slug, versions = registry_latest(dep, out_dir)
+    except (FetchError, ValueError, KeyError) as e:
+        return f"upstream {name}: unavailable ({e})", None
+    lo = vkey(old) if old and not is_pseudo(old) else None
+    pin = vkey(new)
+    stale = bool(pin and vkey(latest) and vkey(latest) > pin)
+    hi = vkey(latest) if stale else pin
+    if old is None and pin:  # an addition: the notes for the pinned release itself, then anything newer
+        lo = (pin[0], pin[1], pin[2], 0, "")
+    pdir = os.path.join(out_dir, "upstream", safe_name(name))
+    os.makedirs(pdir, exist_ok=True)
+    notes, why, fname = "", "", "releases.md"
+    if slug:
+        try:
+            notes = github_releases(slug, lo, hi)
+        except (FetchError, ValueError) as e:
+            why = str(e)
+    if not notes:
+        try:
+            text = local_changelog(dep, ws)
+        except OSError:
+            text = ""
+        if not text and slug:
+            for f in ("CHANGELOG.md", "CHANGES.md"):
+                try:
+                    text = curl(f"https://raw.githubusercontent.com/{slug}/HEAD/{f}")
+                    break
+                except FetchError:
+                    continue
+        if text:
+            notes, fname = trim_changelog(text, lo, hi), "CHANGELOG.md"
+    wrote = []
+    if notes:
+        if len(notes.encode()) > MAX_NOTES_BYTES:
+            notes = notes.encode()[:MAX_NOTES_BYTES].decode(errors="ignore") + "\n\n[truncated at 40 KB]\n"
+        with open(os.path.join(pdir, fname), "w") as fh:
+            fh.write(f"<!-- {name}: releases after {old or 'the pinned release'} through {latest if stale else new}"
+                     f"{f'; the diff pins {new}, so everything above it is not yet adopted' if stale else ''} -->\n\n{notes}")
+        wrote.append(fname)
+    if versions:
+        with open(os.path.join(pdir, "versions.txt"), "w") as fh:
+            fh.write("\n".join(versions) + "\n")
+        wrote.append("versions.txt")
+    span = f"{old}→{new}" if old else f"added at {new}"
+    if not wrote:
+        return f"upstream {name} {span} (latest {latest}): unavailable (no release notes found{'; ' + why if why else ''})", None
+    target = os.path.join(pdir, wrote[0])
+    msg = f"upstream {name} {span} (latest {latest}): {target}{scratch_note}"
+    diag = None
+    if stale:
+        diag = {"tool": "upstream", "file": dep["file"] or None, "line": dep.get("line"),
+                "message": f"{name} is pinned at {new}; the latest release is {latest}"}
+    return msg, diag
+
+
+def upstream_stage(ws, base, head, contract, text):
+    """(context items, diagnostics). Notes land in <run output dir>/upstream/<pkg>/ — the directory
+    holding the saved diff — or a scratch directory when the harness gives none."""
+    global UPSTREAM_END
+    by_file = diff_by_file(text)
+    deps = dependency_changes(by_file, lambda p: show_rev(ws, head, p) if head else _read(ws, p),
+                              lambda p: show_rev(ws, base, p))
+    have = {(d["eco"], d["name"]) for d in deps}
+    for eco, name, ver, gomod_dir in IMPORTED:
+        if (eco, name) not in have and ver:
+            have.add((eco, name))
+            deps.append(dict(eco=eco, name=name, old=None, new=ver, file="", line=None, rank=2, gomod_dir=gomod_dir))
+    deps = sorted(deps, key=lambda d: d["rank"])[:MAX_UPSTREAM]
+    if not deps:
+        return [], []
+    out_dir, note = None, ""
+    if contract.get("diff"):
+        cand = os.path.dirname(contract["diff"])
+        if os.path.isdir(cand) and os.access(cand, os.W_OK):
+            out_dir = cand
+    if not out_dir:
+        import tempfile
+        out_dir = tempfile.mkdtemp(prefix="review-upstream-")
+        note = " (scratch dir: the harness gave this node no output directory)"
+    from concurrent.futures import ThreadPoolExecutor, wait
+    UPSTREAM_END = time.monotonic() + UPSTREAM_BUDGET
+    ex = ThreadPoolExecutor(max_workers=len(deps))
+    futs = [ex.submit(resolve_upstream, d, ws, out_dir, note) for d in deps]
+    wait(futs, timeout=UPSTREAM_BUDGET + 0.5)
+    ex.shutdown(wait=False, cancel_futures=True)
+    items, diags = [], []
+    for d, f in zip(deps, futs):
+        try:
+            msg, diag = f.result(timeout=0) if f.done() else (f"upstream {d['name']}: unavailable (stage budget spent)", None)
+        except Exception as e:
+            msg, diag = f"upstream {d['name']}: unavailable ({str(e)[:80]})", None
+        items.append((-2, None, None, f"upstream:{d['name']}", msg))
+        if diag:
+            diags.append(diag)
+    return items, diags
+
+
+def _read(ws, path):
+    try:
+        with open(os.path.join(ws, path), errors="replace") as fh:
+            return fh.read()
+    except Exception:
+        return ""
+
+
+def upstream_self_test():
+    import tempfile
+    global fetch_cmd, IMPORTED
+    real = fetch_cmd
+    calls = []
+    rels = [{"tag_name": t, "published_at": "2024-01-0%dT00:00:00Z" % i, "body": f"notes for {t}", "draft": False}
+            for i, t in enumerate(["v1.7.0", "v1.8.0", "v1.8.4", "v1.9.0", "v1.10.0"], 1)]
+
+    def stub(argv, cwd=None, env=None, timeout=None):
+        calls.append(argv)
+        if argv[-1] == "golang.org/x/sys":
+            raise FetchError("go: no network")
+        if argv[:3] == ["go", "list", "-m"]:
+            return argv[-1] + " v1.7.0 v1.8.0 v1.8.4 v1.9.0 v1.10.0 v1.11.0-rc1\n"
+        if argv[0] == "gh" and "stretchr/testify/releases" in argv[-1]:
+            return json.dumps(rels)
+        if argv[0] == "curl" and argv[-1] == "https://registry.npmjs.org/left-pad/latest":
+            return json.dumps({"version": "1.3.0", "repository": {"url": "git+https://github.com/stevemao/left-pad.git"}})
+        if argv[0] == "gh" and "stevemao/left-pad/releases" in argv[-1]:
+            return json.dumps([{"tag_name": "v1.3.0", "body": "left-pad 1.3.0 body", "published_at": "2018-04-01"}])
+        raise FetchError("stub: no network")
+
+    assert vkey("v1.10.0") > vkey("v1.9.0") > vkey("v1.9.0-rc1") > vkey("1.2")
+    assert spec_version("^1.2.3") == "1.2.3" and spec_version("workspace:*") is None and spec_version("github:o/r") is None
+    assert github_slug("git+https://github.com/o/r.git") == "o/r" and github_slug("github.com/o/r/v2") == "o/r"
+    assert github_slug("golang.org/x/net") is None
+    gomod = ("+++ b/go.mod\n@@ -5,2 +5,2 @@\n-\tgithub.com/stretchr/testify v1.8.0\n+\tgithub.com/stretchr/testify v1.9.0\n"
+             "@@ -9 +9 @@\n+\tgolang.org/x/sys v0.1.0 // indirect\n")
+    pkgjson = ('+++ b/web/package.json\n@@ -3 +3,2 @@\n+    "left-pad": "^1.3.0",\n+    "name": "web",\n')
+    heads = {"web/package.json": '{"name": "web", "dependencies": {"left-pad": "^1.3.0"}}'}
+    ch = dependency_changes(diff_by_file(gomod + pkgjson), lambda p: heads.get(p, ""), lambda p: "")
+    assert [(c["eco"], c["name"], c["old"], c["new"], c["rank"]) for c in ch] == [
+        ("go", "github.com/stretchr/testify", "v1.8.0", "v1.9.0", 0), ("npm", "left-pad", None, "1.3.0", 1),
+        ("go", "golang.org/x/sys", None, "v0.1.0", 3)], ch
+    lock = '{"packages": {"node_modules/left-pad": {"version": "1.3.0"}, "node_modules/other": {"version": "9.0.0"}}}'
+    assert lock_versions("package-lock.json", lock, {"left-pad"}) == {"left-pad": "1.3.0"}
+    assert lock_versions("yarn.lock", '"@a/b@^1.0.0", "@a/b@^1.1.0":\n  version "1.1.4"\n', {"@a/b"}) == {"@a/b": "1.1.4"}
+    assert lock_versions("pnpm-lock.yaml", "packages:\n  /left-pad@1.3.0:\n    resolution: {}\n", {"left-pad"}) == {"left-pad": "1.3.0"}
+    assert declared_cargo('[package]\nname="x"\n[dependencies]\nserde = "1.0"\n[dev-dependencies.tokio]\nversion = "1"\n') == {"serde", "tokio"}
+    cg = dependency_changes(diff_by_file('+++ b/Cargo.toml\n@@ -1 +1 @@\n-serde = "1.0.100"\n+serde = { version = "1.0.150", features = ["derive"] }\n'),
+                            lambda p: '[dependencies]\nserde = "1"\n', lambda p: "")
+    assert [(c["name"], c["old"], c["new"]) for c in cg] == [("serde", "1.0.100", "1.0.150")], cg
+    assert trim_changelog("# Changelog\n\n## 1.2.0\nnew\n## 1.1.0\nmid\n## 1.0.0\nold\n", vkey("1.0.0"), vkey("1.1.0")) == "## 1.1.0\nmid\n"
+    fetch_cmd = stub
+    try:
+        with tempfile.TemporaryDirectory() as out:
+            with open(os.path.join(out, "diff.patch"), "w") as fh:
+                fh.write(gomod + pkgjson)
+            os.makedirs(os.path.join(out, "web"))
+            with open(os.path.join(out, "web", "package.json"), "w") as fh:
+                fh.write(heads["web/package.json"])
+            items, diags = upstream_stage(out, "", "", {"diff": os.path.join(out, "diff.patch")}, gomod + pkgjson)
+            msgs = {it[4].split(" ")[1].rstrip(":"): it[4] for it in items}
+            tpath = os.path.join(out, "upstream", "github.com_stretchr_testify")
+            assert msgs["github.com/stretchr/testify"] == (
+                f"upstream github.com/stretchr/testify v1.8.0→v1.9.0 (latest v1.10.0): {tpath}/releases.md"), msgs
+            notes = open(os.path.join(tpath, "releases.md")).read()
+            assert "notes for v1.10.0" in notes and "notes for v1.9.0" in notes and "notes for v1.8.4" in notes, notes
+            assert "notes for v1.8.0" not in notes and "notes for v1.7.0" not in notes, notes
+            assert "v1.11.0-rc1" in open(os.path.join(tpath, "versions.txt")).read()
+            lp = os.path.join(out, "upstream", "left-pad", "releases.md")
+            assert msgs["left-pad"] == f"upstream left-pad added at 1.3.0 (latest 1.3.0): {lp}", msgs
+            assert "left-pad 1.3.0 body" in open(lp).read()
+            assert msgs["golang.org/x/sys"].startswith("upstream golang.org/x/sys: unavailable (") , msgs
+            assert diags == [{"tool": "upstream", "file": "go.mod", "line": 5,
+                              "message": "github.com/stretchr/testify is pinned at v1.9.0; the latest release is v1.10.0"}], diags
+            # no output directory from the harness: a scratch directory, said so in the pointer
+            items, _ = upstream_stage(out, "", "", {}, pkgjson)
+            assert "scratch dir" in items[0][4] and "review-upstream-" in items[0][4], items
+    finally:
+        fetch_cmd = real
+    assert upstream_stage(".", "", "", {}, "+++ b/a.go\n+x := 1\n") == ([], [])
 
 
 def self_test():
@@ -687,6 +1193,7 @@ def self_test():
                         "+++ b/a.ts\n+const r = api.getThing(1); api.getThing(2); console.log(r)\n+++ b/README.md\n+call a.Doc(x)\n")
     assert dict(c) == {("store.Fetch", True): 1, ("api.getThing", False): 2}, dict(c)
     assert added_content("+++ b/a.go\n+one\n-two\n+++ /dev/null\n+gone\n") == [("a.go", "one")]
+    upstream_self_test()
     print("context-pack self-test: ok")
 
 
@@ -724,6 +1231,12 @@ def main():
             items += fn()
         except Exception as e:
             print(f"context-pack: references: {e}", file=sys.stderr)
+    diagnostics = []
+    try:
+        up_items, diagnostics = upstream_stage(ws, base, head, contract, text)
+        items += up_items
+    except Exception as e:
+        print(f"context-pack: upstream: {e}", file=sys.stderr)
     items.sort(key=lambda it: it[0])  # stable: priority, then discovery order
     seen, lines = set(), []
     for pri, changed, kind, ptr, why in items:
@@ -738,7 +1251,7 @@ def main():
         lines.append({"tool": "context-pack", "message": f"{extra} lower-priority pointers omitted"})
     # The context channel renders ahead of the diff as "open these before judging"; the
     # diagnostics channel would file the same lines under "already reported" and lose them.
-    json.dump({"diagnostics": [], "context": lines, "triggers": []}, sys.stdout)
+    json.dump({"diagnostics": diagnostics, "context": lines, "triggers": []}, sys.stdout)
 
 
 if __name__ == "__main__":
