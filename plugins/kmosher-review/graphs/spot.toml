@@ -1,0 +1,37 @@
+# The spot-check graph: one Sonnet code reader at medium effort for the obvious bugs, precision over recall.
+# Bench Oct 2026 on the prelim four: 10/42 comments, 3 findings a review with 40% of them matching a reviewer comment, 1.2 min, $1.08 a review.
+[defaults]
+provider = "claude"
+model = "sonnet"
+tools = ["Bash", "Read", "Grep", "Glob"]
+timeout = 1800
+conventions = "inline"
+
+[[node]]
+name = "lint"
+kind = "mechanical"
+provider = "command"
+command = ["mechanical/changed-lint"]
+timeout = 600
+
+[[node]]
+name = "code"
+kind = "generator"
+effort = "medium"
+system_prompt = ["generator-preamble.md", "../lenses/SHARED_CONVENTIONS.md", "../lenses/review-code/SKILL.md"]
+
+[[node]]
+name = "auditor"
+kind = "critic"
+model = "haiku"
+effort = "medium"
+needs = ["code"]
+per_need = true
+system_prompt = ["auditor.md"]
+
+[[node]]
+name = "dedupe"
+kind = "merger"
+model = "haiku"
+tools = []
+system_prompt = ["merger.md"]
