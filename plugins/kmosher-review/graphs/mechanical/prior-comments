@@ -29,6 +29,7 @@ finish() {
 }
 
 [[ -n "$tmp" ]] || { log "no temp directory"; finish; }
+[[ -z "${REVIEW_RUN_NO_GH:-}" ]] || { log "GitHub is disabled for this run (--no-gh)"; finish; }
 for tool in jq gh claude git; do
   command -v "$tool" >/dev/null || { log "$tool is not on PATH"; finish; }
 done

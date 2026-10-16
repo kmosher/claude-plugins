@@ -463,11 +463,12 @@ def pr_body(ws, contract):
 
 
 class Gh:
-    """gh with a per-call timeout; dies quietly when gh is missing, unauthenticated or too slow."""
+    """gh with a per-call timeout; dies quietly when gh is missing, unauthenticated or too slow, and is
+    dead from the start in a review-run `--no-gh` run (REVIEW_RUN_NO_GH)."""
 
     def __init__(self, ws):
         self.ws = ws
-        self.dead = shutil.which("gh") is None
+        self.dead = shutil.which("gh") is None or bool(os.environ.get("REVIEW_RUN_NO_GH"))
 
     def run(self, *args):
         if self.dead or time.monotonic() > DEADLINE:
