@@ -10,6 +10,7 @@
   "plugins": [
     {
       "name": "kmosher-review",
+      "version": "0.13.7",
       "source": {
         "source": "git-subdir",
         "url": "kmosher/claude-plugins",

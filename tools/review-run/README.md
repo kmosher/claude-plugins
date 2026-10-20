@@ -45,10 +45,13 @@ stderr. Exit codes are listed in `review-run --help`.
 
 ## Cost and time
 
-Each lens is a full agent session, so a review of a mid-sized change takes
-several minutes and spends on the order of a dollar or more of model usage;
-the graph decides. Use `--skip`, a smaller graph (`quick`, `spot`) or
-`--model NODE=...` to trade depth for cost, and `--dry-run` first.
+Each lens is a full agent session, so cost scales with the diff. One run of
+the default graph over a 53-file, +4k/-1.3k line change cost about $7 and took
+about 8 minutes: roughly $2.80 for correctness, $2.10 for legibility, $1.20 for
+release-engineering, $1.05 for compatibility, and cents for the auditors. The
+`## Nodes` table in the report shows each node's cost and time. Use `--skip`, a
+smaller graph (`quick`, `spot`) or `--model NODE=...` to trade depth for cost,
+and `--dry-run` first.
 
 ## Caveats
 

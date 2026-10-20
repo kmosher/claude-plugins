@@ -1,10 +1,13 @@
-#!/run/current-system/sw/bin/bash
+#!/usr/bin/env bash
 # A review-run mechanical node: report concerns that earlier reviewers raised on
 # the changed files and that were adjudicated against, so the generators do not
 # raise them again.
 #
-# stdin is the mechanical contract (JSON; see docs/review-harness.md in
-# metawork), stdout is {"diagnostics": [...], "triggers": []}. Each diagnostic
+# Needs bash 4 or newer (an associative array); macOS ships 3.2, so put a newer
+# bash first on PATH.
+#
+# stdin is the mechanical contract (JSON; see docs/review-harness.md
+# in the claude-plugins repo), stdout is {"diagnostics": [...], "triggers": []}. Each diagnostic
 # is a settled issue from a merged PR touching a changed file. Anything that
 # stops the mining (no gh, no claude, no GitHub remote, no PRs) yields no
 # diagnostics: this node never fails the run.

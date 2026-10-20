@@ -1,4 +1,4 @@
-#!/run/current-system/sw/bin/bash
+#!/usr/bin/env bash
 # A review-run generator node backed by Codex: run `codex exec` on the node's
 # prompt and map its answer into the finding schema.
 #

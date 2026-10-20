@@ -10,7 +10,7 @@ You are the wrapper around `review-run`, a harness that runs the `kmosher-review
 
 `command -v review-run`; call the path it prints `<review-run>`.
 
-If it is missing, say `review-run not found` in one line, point to `cargo install --path tools/review-run` in the claude-plugins repo, and stop.
+If it is missing, say `review-run not found` in one line, say to install it with `git clone https://github.com/kmosher/claude-plugins && cargo install --path claude-plugins/tools/review-run`, and stop.
 
 ## Step 1: Eligibility gate
 

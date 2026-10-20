@@ -1,22 +1,27 @@
-#!/run/current-system/sw/bin/bash
+#!/usr/bin/env bash
 # A review-run mechanical node: lint the changed files with the same tools
 # lint-recipe picks at commit time, and report what they say as diagnostics.
 #
-# stdin is the mechanical contract (JSON; see docs/review-harness.md in
-# metawork), stdout is {"diagnostics": [...], "triggers": []}. Lint
+# stdin is the mechanical contract (JSON; see docs/review-harness.md
+# in the claude-plugins repo), stdout is {"diagnostics": [...], "triggers": []}. Lint
 # complaints are diagnostics and exit 0; a non-zero exit means this script
 # could not do its job at all, which stops the review.
 #
-# lint-recipe answers with nothing when the repo declares its own `lint-fast`
+# lint-recipe is an external command, not part of this repo; without it on
+# PATH this node reports nothing. It answers with nothing when the repo declares its own `lint-fast`
 # target, so such a repo gets no diagnostics from this node.
 
 set -uo pipefail
 
-LINT_RECIPE="${LINT_RECIPE:-/opt/metawork/bin/lint-recipe}"
+LINT_RECIPE="${LINT_RECIPE:-lint-recipe}"
 die() { echo "changed-lint: $*" >&2; exit 2; }
 
 command -v jq >/dev/null || die "jq is not on PATH"
-[[ -x "$LINT_RECIPE" ]] || die "$LINT_RECIPE is not executable"
+if ! command -v "$LINT_RECIPE" >/dev/null; then
+  echo "changed-lint: $LINT_RECIPE is not on PATH, so nothing is linted" >&2
+  echo '{"diagnostics": [], "triggers": []}'
+  exit 0
+fi
 contract=$(cat)
 ws=$(jq -er '.workspace' <<<"$contract") || die "stdin is not a mechanical contract"
 [[ -d "$ws" ]] || die "workspace $ws is not a directory"

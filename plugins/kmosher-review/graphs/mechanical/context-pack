@@ -3,8 +3,8 @@
 diff that the changed files depend on or are depended on by, so a lens can
 check a claim against the file it is about instead of trusting it.
 
-stdin is the mechanical contract (JSON; see docs/review-harness.md in
-metawork), stdout is {"diagnostics": [], "context": [...], "triggers": []}. Each
+stdin is the mechanical contract (JSON; see docs/review-harness.md
+in the claude-plugins repo), stdout is {"diagnostics": [], "context": [...], "triggers": []}. Each
 context line is one pointer, never file contents:
 
     <changed file> -> <kind>: <path>[:<line>] -- <why>
