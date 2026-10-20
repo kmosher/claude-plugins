@@ -2,6 +2,7 @@
 //! one TOML file; prompt paths and a command's path to its executable are
 //! relative to that file.
 
+use crate::builtin;
 use crate::conventions::{self, Mode};
 use crate::triggers::{RawTrigger, Trigger};
 use serde::Deserialize;
@@ -363,6 +364,27 @@ impl Graph {
                 }
                 ProviderKind::Command if n.command.is_empty() => {
                     return Err(format!("node `{}`: a command node needs a command", n.name));
+                }
+                ProviderKind::Command => {
+                    if let Some(name) = n.command[0].strip_prefix(builtin::PREFIX) {
+                        match builtin::expects(name) {
+                            None => {
+                                return Err(format!(
+                                    "node `{}`: no built-in node `{name}`",
+                                    n.name
+                                ));
+                            }
+                            Some(kind) if kind != n.kind => {
+                                return Err(format!(
+                                    "node `{}`: built-in `{name}` is a {} node, not {}",
+                                    n.name,
+                                    kind.as_str(),
+                                    n.kind.as_str()
+                                ));
+                            }
+                            Some(_) => {}
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -750,6 +772,27 @@ mod tests {
             "only the program moves"
         );
         assert_eq!(g.nodes[1].command, ["true"]);
+    }
+
+    #[test]
+    fn a_builtin_command_must_exist_and_match_its_node_kind() {
+        let node = |kind: &str, cmd: &str| {
+            format!("[[node]]\nname = \"m\"\nkind = \"{kind}\"\nprovider = \"command\"\ncommand = [\"{cmd}\"]\n")
+        };
+        let load = |text: String| {
+            Graph::parse(&text, Path::new("/g"), "t").map(|g| g.nodes[0].command.clone())
+        };
+        assert_eq!(
+            load(node("mechanical", "builtin:prior-comments")).unwrap(),
+            ["builtin:prior-comments"]
+        );
+        assert!(load(node("generator", "builtin:codex-lens")).is_ok());
+        assert!(load(node("mechanical", "builtin:nope"))
+            .unwrap_err()
+            .contains("no built-in node `nope`"));
+        assert!(load(node("generator", "builtin:changed-lint"))
+            .unwrap_err()
+            .contains("is a mechanical node, not generator"));
     }
 
     #[test]

@@ -711,6 +711,10 @@ fn real_main(cli: &Cli) -> Result<Option<bool>, String> {
 }
 
 fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some(review_run::builtin::SUBCOMMAND) {
+        return review_run::builtin::main(args.get(2).map(String::as_str).unwrap_or(""));
+    }
     match real_main(&Cli::parse()) {
         Ok(Some(true)) => ExitCode::SUCCESS,
         Ok(Some(false)) => ExitCode::from(1),

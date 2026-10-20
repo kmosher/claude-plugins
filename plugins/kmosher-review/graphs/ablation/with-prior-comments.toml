@@ -38,7 +38,7 @@ agent-skills = { touches = [
 name = "prior-comments"
 kind = "mechanical"
 provider = "command"
-command = ["../mechanical/prior-comments"]
+command = ["builtin:prior-comments"]
 timeout = 900
 
 [[node]]

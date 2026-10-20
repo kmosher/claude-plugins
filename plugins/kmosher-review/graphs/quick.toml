@@ -10,7 +10,7 @@ conventions = "inline"
 name = "lint"
 kind = "mechanical"
 provider = "command"
-command = ["mechanical/changed-lint"]
+command = ["builtin:changed-lint"]
 timeout = 600
 
 [[node]]

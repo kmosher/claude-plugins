@@ -3,6 +3,7 @@
 //! critic, schema-enforced, mechanical nodes, and triggers that make lenses
 //! conditional, with the capture bundle written by the harness.
 
+pub mod builtin;
 pub mod conventions;
 pub mod graph;
 pub mod provider;

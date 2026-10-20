@@ -90,6 +90,19 @@ Skipping is a decision of the graph, never of a model.
 
 A mechanical node is a `command` node; a relative `command` path containing a
 slash is resolved against the graph file, since children run in the workspace.
+Any executable that speaks the contract works, in any language. The harness
+also ships built-in nodes, named `command = ["builtin:<name>"]`: it runs
+itself as the node, so there is no script and no interpreter to install, and
+the node gets the same timeout, `--no-gh` environment and captured output as
+any command.
+
+| Built-in | Kind | What it does |
+|---|---|---|
+| `builtin:prior-comments` | mechanical | Mines the merged pull requests that touched the largest changed files for review concerns that were adjudicated against, with `gh` and a `claude -p --model haiku` call per pull request, and reports each as a diagnostic so generators do not raise it again. Never fails the run: no `gh`, `claude` or `git`, no GitHub `origin`, `--no-gh`, or no pull requests means no diagnostics. `PRIOR_COMMENTS_MAX_FILES` (default 10) and `PRIOR_COMMENTS_MAX_PRS` (per file, default 5) bound the work. Progress goes to stderr, prefixed `prior-comments:`. |
+| `builtin:changed-lint` | mechanical | Lints the changed files that still exist with the tools `lint-recipe` picks for them (`$LINT_RECIPE`, default `lint-recipe` from `PATH`) and reports their output as diagnostics. With no `lint-recipe` it reports nothing; if `lint-recipe` itself fails the node fails. |
+| `builtin:codex-lens` | generator | Runs `codex exec` read-only on the node's prompt and maps its answer into findings, each carrying `invariant` and `verify`; a finding without a file and line is kept at low confidence. A missing or logged-out `codex` yields no findings, with the reason in `meta`. |
+
+A built-in must sit on a node of its kind; the graph is rejected otherwise.
 It receives JSON on stdin with `node`,
 `workspace`, `base`, `head`, `changed_files`, `diff` (the path of
 `diff.patch` in the bundle), `out`, `pr_number` and `pr_body`, and writes JSON

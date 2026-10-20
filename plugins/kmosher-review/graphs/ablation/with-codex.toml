@@ -1,4 +1,4 @@
-# Adds: a codex generator (mechanical/codex-lens), audited like the others.
+# Adds: a codex generator (builtin:codex-lens), audited like the others.
 [defaults]
 provider = "claude"
 model = "opus"
@@ -62,7 +62,7 @@ system_prompt = ["../generator-preamble.md", "../../lenses/SHARED_CONVENTIONS.md
 name = "codex"
 kind = "generator"
 provider = "command"
-command = ["../mechanical/codex-lens"]
+command = ["builtin:codex-lens"]
 timeout = 1800
 
 [[node]]

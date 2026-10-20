@@ -409,8 +409,12 @@ impl Provider for Exec {
             envelope.to_string()
         };
         let stdout = attempt_file(inv, "stdout", "json");
+        let argv = match crate::builtin::resolve(&inv.node.command) {
+            Ok(a) => a,
+            Err(e) => return Outcome::failed(e),
+        };
         let exit = match spawn(
-            &inv.node.command,
+            &argv,
             &[],
             inv,
             stdin.as_bytes(),
