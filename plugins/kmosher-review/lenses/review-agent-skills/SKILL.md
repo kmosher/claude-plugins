@@ -140,4 +140,4 @@ If the diff doesn't actually touch any skill files (false positive on routing), 
 - Anthropic skill-creator: <https://github.com/anthropics/skills/blob/main/skills/skill-creator/SKILL.md>
 - Official plugin-dev skill-development: <https://github.com/anthropics/claude-plugins-official/blob/main/plugins/plugin-dev/skills/skill-development/SKILL.md>
 - Claude Code skills docs: <https://docs.claude.com/en/docs/claude-code/skills>
-- Pattern of citing the rule code in findings adapted from EON's structured-finding category field.
+- Pattern of citing the rule code in findings adapted from another AI reviewer's structured-finding category field.

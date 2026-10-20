@@ -75,7 +75,7 @@ Each is a *test* the reviewer applies and flags failures. Concrete enough that t
 ### Deferred comment judgment
 
 An invocation may state that **comment judgment is deferred** — the caller runs a
-dedicated comment pass after this review (`kmo:finalize`, which strips every
+dedicated comment pass after this review (one that strips every
 comment from the changed files and keeps only the ones a reader who never saw
 them demonstrably needed). When it does:
 

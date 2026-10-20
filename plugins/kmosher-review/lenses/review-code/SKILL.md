@@ -181,8 +181,8 @@ line of code that contradicts it.
 
 ## Evidence behind techniques 5 and 9
 
-Measured against the ReviewBench corpus (2026-09-09): 17 PRs where these lenses
-and an external reviewer — Copilot, Eon, or a human — both commented on the same
+Measured against a corpus of reviewed PRs (2026-09-09): 17 PRs where these lenses
+and an external reviewer — an AI reviewer or a human — both commented on the same
 diff. 148 substantive external comments, 343 lens findings in scope.
 
 **Technique 5 is a strength, and is written down to keep it.** Of external
@@ -195,7 +195,7 @@ evidence either way.
 **Technique 9 is the measured gap.** Roughly a third of everything external
 reviewers caught and the lenses did not was build, artifact and config-key
 mechanics — Makefile prerequisites, multi-arch paths, dockerignore semantics, an
-alarm filtering a key that had been renamed. Copilot in particular resolves
+alarm filtering a key that had been renamed. AI reviewers in particular resolve
 these mechanically. It was nobody's technique and, per `review-releng`'s own
 scope line, nobody's lens.
 

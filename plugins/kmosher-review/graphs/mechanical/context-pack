@@ -1204,7 +1204,7 @@ def upstream_self_test():
 def self_test():
     assert sorted(find_citations("fix for #123 and (#45), see PR 67, issue #8")) == [(None, 8), (None, 45), (None, 67), (None, 123)]
     assert find_citations("color: #123456; &#39; a/b#7 x#9") == []
-    assert find_citations("https://github.com/pulumi/pulumi/pull/4242") == [("pulumi/pulumi", 4242)]
+    assert find_citations("https://github.com/example/repo/pull/4242") == [("example/repo", 4242)]
     assert [n for _, n in find_citations("see https://github.com/o/r/issues/9 and #9")] == [9, 9]
     assert GO_QUALIFIED.findall("x := pkg.Func(a) + a.b.Method(c) + obj.method(d) + fmt.Sprintf(") == ["pkg.Func", "fmt.Sprintf"]
     assert TS_QUALIFIED.findall("client.fetchAll(x); this.y(); a.b.c(); JSON.parse(z); foo.Bar(q)") == ["client.fetchAll", "this.y"]

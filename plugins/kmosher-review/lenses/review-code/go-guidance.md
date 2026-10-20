@@ -5,7 +5,7 @@ language-agnostic body: bug-shaped anti-patterns whose underlying
 mechanism only exists in Go, and design-level judgment — what linters
 don't check. Curated from
 [spf13/go-skills](https://github.com/spf13/go-skills), cross-pollinated
-from the equivalent skill in `pulumi/background-agents`'s github-bot.
+from another team's Go review skill.
 
 **Load this file only when the diff touches Go files (`.go`, `go.mod`).**
 Skip it entirely otherwise — keep it out of the main `SKILL.md` body so

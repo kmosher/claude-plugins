@@ -1,28 +1,25 @@
 # The review ladder
 
-What the suite should become, from what the ReviewBench corpus says about what
-it is. Measurements are from ~150 review runs and the head-to-head bench in
-`~/ai-tools/reviewbench/tools/bench`; the numbers are directional, not final.
+Where the suite is heading: a sequence of increasingly expensive rungs, so the
+cheap checks run after every commit and the deep ones run once, on code that is
+about to ship.
 
-## What the corpus says
+## What the design responds to
 
-- **Serial lenses cost the whole wall-clock.** Median run 14 min; median sum
-  of lens durations 13.6 min; median longest lens 5.8 min. Lenses do not
-  depend on each other, and the P0 gate that justifies ordering fired 3 times
-  in 1261 findings.
-- **A third of reading is repeated.** Each secondary lens re-reads 40–48% of
-  the files review-code read. No lens has ever used an LSP tool.
-- **Findings are recall-first.** The auditor downgrades 23% and drops 2%; the
-  suite emits 3–5× the findings per PR of Anthropic's `/code-review`, whose
-  findings on the bench landed almost entirely on code that later changed.
-- **What others find that we don't**, from the Eon and Copilot miss lists:
-  names that stopped resolving (a renamed metric label, a build context not
-  added to the lint target), prose that no longer describes the code, tests
-  that cannot fail, and anything that needed running to see.
-- **Finalize's blind readers find review-grade things** at a tenth of a
-  review's cost: two readers, ~8k output tokens, 2–5 min.
-- **Cache reads were overcounted 1.6×** in earlier cost figures; output-token
-  figures stand. A live lens is ~10k output tokens, a review ~40k.
+- **Serial lenses cost the whole wall-clock.** The lenses do not depend on each
+  other, and the gate that justifies ordering them almost never fires, so they
+  can run concurrently.
+- **A good deal of reading is repeated.** Each secondary lens re-reads much of
+  what the first one read, and no lens uses an LSP tool.
+- **Findings are recall-first.** The auditor downgrades a fair share and drops
+  few, so the suite emits several times the findings per PR of a general-purpose
+  review.
+- **What other reviewers find that this suite doesn't**: names that stopped
+  resolving (a renamed metric label, a build context not added to the lint
+  target), prose that no longer describes the code, tests that cannot fail, and
+  anything that needed running to see.
+- **Blind comment readers find review-grade things** at a fraction of a
+  review's cost: two readers, a few thousand output tokens, a few minutes.
 
 ## The rungs
 
@@ -70,9 +67,8 @@ the question narrow.
 
 ## Measuring it
 
-ReviewBench's bench runner scores every arm against Eon and Copilot comments
-and against the first-revision oracle (regions the merged revision changed
-since the first, by cause: review-driven, human-prompted, contested
-decision, drift). Each rung change should move one of: findings on
-later-changed regions per dollar, findings on never-changed code, wall-clock
-to first finding.
+Score each arm against the comments other reviewers left and against a
+first-revision oracle (the regions the merged revision changed since the first,
+by cause: review-driven, human-prompted, contested decision, drift). Each rung
+change should move one of: findings on later-changed regions per dollar,
+findings on never-changed code, wall-clock to first finding.

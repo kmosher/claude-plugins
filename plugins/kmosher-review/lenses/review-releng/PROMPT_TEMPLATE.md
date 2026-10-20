@@ -16,7 +16,7 @@ Files: <list>
 
 ## Required reading first
 
-[Pre-load deploy/runbook context: the service's deploy mechanism (e.g. `gh-push-status` workflow, Pulumi stack, ArgoCD app), its SLOs, the on-call rotation that owns it, the relevant Grafana/Datadog dashboards, and any prior incidents in this surface area.]
+[Pre-load deploy/runbook context: the service's deploy mechanism (e.g. a deploy workflow, a Pulumi stack, an ArgoCD app), its SLOs, the on-call rotation that owns it, the relevant Grafana/Datadog dashboards, and any prior incidents in this surface area.]
 
 ## Apply this checklist
 

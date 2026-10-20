@@ -15,7 +15,7 @@ Read `../SHARED_CONVENTIONS.md` before applying this lens — covers REVIEW.md o
 
 **Use for:** any PR touching production services; schema migrations or config changes to load-bearing systems; changes to systems with SLOs/SLAs/compliance; anything that could page someone at 3am; final pre-merge gate after correctness is settled.
 
-**Also use for the build and release path itself**, wherever it lives and whatever the repo is: Makefiles, Dockerfiles and `.dockerignore`, CI workflow and action definitions, release/tagging automation, artifact paths and naming. This is claimed here deliberately. It used to fall between lenses — this one disclaimed correctness, `review-code` reads program logic — and the ReviewBench corpus shows it is the largest category external reviewers catch that we miss (see `review-code`'s Evidence section). A build rule that silently keeps a stale binary pages someone exactly like a bad deploy does.
+**Also use for the build and release path itself**, wherever it lives and whatever the repo is: Makefiles, Dockerfiles and `.dockerignore`, CI workflow and action definitions, release/tagging automation, artifact paths and naming. This is claimed here deliberately. It used to fall between lenses — this one disclaimed correctness, `review-code` reads program logic — and a corpus of reviewed PRs shows it is the largest category external reviewers catch that we miss (see `review-code`'s Evidence section). A build rule that silently keeps a stale binary pages someone exactly like a bad deploy does.
 
 **Don't use for:** pure CLI/library changes with no runtime deploy surface *and no build-path changes*; documentation; test-only PRs; local-dev tools.
 
@@ -172,7 +172,7 @@ Replace generic placeholders with project-specific artifacts:
 - "Metrics" → reference the actual telemetry stack
 - "Staging traffic cycle" → reference your actual SLOs
 
-A skill that says "deploy to staging" is generic; one that says "run `gh-push-status`, watch the relevant Grafana board for 30 minutes" is operational.
+A skill that says "deploy to staging" is generic; one that says "run the deploy-status script, watch the relevant Grafana board for 30 minutes" is operational.
 
 ## Prompt Template
 

@@ -61,7 +61,7 @@ Graph, from `$ARGUMENTS`:
 - `quick` if it contains `quick` — the every-commit graph: cheap readers for easy bugs and inconsistencies, no Opus.
 - `spot` if it contains `spot` — the spot-check graph: one Sonnet code reader for the obvious bugs, precision over recall, about a minute.
 - `deep` if it contains `deep` — if `${CLAUDE_PLUGIN_ROOT}/graphs/deep.toml` does not exist (`test -f`), say `deep graph not found` and stop; do not fall back to another graph.
-- `defer-comments` if it contains `defer-comment-judgment` — the legibility lens leaves comment prose to a later comment pass (`kmo:finalize`) and still reports wrong or misplaced comments.
+- `defer-comments` if it contains `defer-comment-judgment` — the legibility lens leaves comment prose to a later comment pass and still reports wrong or misplaced comments.
 - `with-lint` if it contains `lint` — adds a mechanical `lint` node that runs the repo's lint tools over the changed files and feeds their diagnostics into the report.
 - `default` otherwise.
 
@@ -115,7 +115,7 @@ No prior-PR comment mining, no codex cross-model pass. Findings link to the revi
 - `local` (or `no post`, `don't post`) — no offer to post
 - `force` — proceed past an eligibility `skip`, and review again a change already reviewed with no new work since
 - `skip-draft` — let the gate skip drafts
-- `defer-comment-judgment` — use the `defer-comments` graph. Set by `kmo:polish`, whose next stage is `kmo:finalize`.
+- `defer-comment-judgment` — use the `defer-comments` graph. Set by a pipeline whose next stage is a dedicated comment pass.
 - `lint` — use the `with-lint` graph
 - `spot`, `quick` or `deep` — the depth: that graph, taking precedence over the two above. With none, the default graph.
 
