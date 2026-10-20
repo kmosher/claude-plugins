@@ -39,7 +39,7 @@ agent-skills = { touches = [
 name = "context-pack"
 kind = "mechanical"
 provider = "command"
-command = ["../mechanical/context-pack"]
+command = ["builtin:context-pack"]
 timeout = 60
 
 [[node]]

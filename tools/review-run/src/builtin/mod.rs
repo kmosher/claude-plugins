@@ -6,6 +6,7 @@
 
 pub mod changed_lint;
 pub mod codex_lens;
+pub mod context_pack;
 pub mod prior_comments;
 
 use crate::graph::Kind;
@@ -13,6 +14,7 @@ use serde_json::Value;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
+use std::time::Duration;
 
 /// The prefix of a command that names a built-in node.
 pub const PREFIX: &str = "builtin:";
@@ -24,7 +26,7 @@ pub const SUBCOMMAND: &str = "__builtin";
 /// The kind of node each built-in implements, or None for an unknown name.
 pub fn expects(name: &str) -> Option<Kind> {
     match name {
-        "prior-comments" | "changed-lint" => Some(Kind::Mechanical),
+        "prior-comments" | "changed-lint" | "context-pack" => Some(Kind::Mechanical),
         "codex-lens" => Some(Kind::Generator),
         _ => None,
     }
@@ -63,6 +65,11 @@ pub fn main(name: &str) -> ExitCode {
             &runner,
         ),
         "codex-lens" => codex_lens::run(&stdin, &runner),
+        "context-pack" => Ok(context_pack::run(
+            &stdin,
+            &context_pack::Config::from_env(),
+            &runner,
+        )),
         other => Err(Fail {
             code: 2,
             message: format!("review-run: no built-in node `{other}`"),
@@ -106,10 +113,14 @@ pub struct Opts<'a> {
     pub cwd: Option<&'a Path>,
     pub stdin: Option<&'a str>,
     pub env: Vec<(&'a str, String)>,
+    /// The child is killed and the call fails with `ErrorKind::TimedOut` when
+    /// it has not finished by then.
+    pub timeout: Option<Duration>,
 }
 
 /// How a built-in reaches the tools it drives, so tests can stand in for them.
-pub trait Runner {
+/// `Sync` because a node may drive several tools from threads at once.
+pub trait Runner: Sync {
     /// Whether `tool` names an executable: a path as given, else a `PATH` search.
     fn on_path(&self, tool: &str) -> bool;
     /// Runs `prog` to completion. Err when it could not be started.
@@ -123,6 +134,46 @@ fn is_executable(p: &Path) -> bool {
     p.metadata()
         .map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
         .unwrap_or(false)
+}
+
+/// The child's output once it exits, or None after it is killed for running
+/// past `limit`. The pipes are drained on threads so a chatty child cannot
+/// stall against its own full pipe; after a kill they are left to close on
+/// their own, since a grandchild may still hold them open.
+fn wait_within(
+    mut child: std::process::Child,
+    limit: Duration,
+) -> std::io::Result<Option<std::process::Output>> {
+    fn drain<R: Read + Send + 'static>(pipe: Option<R>) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    }
+    let out = drain(child.stdout.take());
+    let err = drain(child.stderr.take());
+    let deadline = std::time::Instant::now() + limit;
+    let mut nap = Duration::from_millis(1);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Ok(None);
+        }
+        std::thread::sleep(nap);
+        nap = (nap * 2).min(Duration::from_millis(20));
+    };
+    Ok(Some(std::process::Output {
+        status,
+        stdout: out.join().unwrap_or_default(),
+        stderr: err.join().unwrap_or_default(),
+    }))
 }
 
 impl Runner for RealRunner {
@@ -160,7 +211,13 @@ impl Runner for RealRunner {
                 let _ = pipe.write_all(&bytes);
             })
         });
-        let out = child.wait_with_output()?;
+        let out = match opts.timeout {
+            None => child.wait_with_output()?,
+            Some(limit) => match wait_within(child, limit)? {
+                Some(out) => out,
+                None => return Err(std::io::ErrorKind::TimedOut.into()),
+            },
+        };
         if let Some(w) = writer {
             let _ = w.join();
         }
@@ -238,14 +295,24 @@ pub fn json_stream(text: &str) -> Option<Vec<Value>> {
 #[cfg(test)]
 pub mod stub {
     use super::*;
-    use std::cell::RefCell;
+    use std::sync::{Mutex, MutexGuard};
 
-    pub type Script = Box<dyn Fn(&str, &[String], &Opts) -> std::io::Result<Cmd>>;
+    pub type Script = Box<dyn Fn(&str, &[String], &Opts) -> std::io::Result<Cmd> + Send + Sync>;
+
+    /// The calls a stub has answered, shared across the threads that made them.
+    #[derive(Default)]
+    pub struct Calls(Mutex<Vec<String>>);
+
+    impl Calls {
+        pub fn borrow(&self) -> MutexGuard<'_, Vec<String>> {
+            self.0.lock().unwrap()
+        }
+    }
 
     pub struct Stub {
         pub tools: Vec<&'static str>,
         pub script: Script,
-        pub calls: RefCell<Vec<String>>,
+        pub calls: Calls,
     }
 
     impl Stub {
@@ -253,7 +320,7 @@ pub mod stub {
             Stub {
                 tools: tools.to_vec(),
                 script,
-                calls: RefCell::new(Vec::new()),
+                calls: Calls::default(),
             }
         }
     }
@@ -265,7 +332,7 @@ pub mod stub {
 
         fn run(&self, prog: &str, args: &[String], opts: &Opts) -> std::io::Result<Cmd> {
             self.calls
-                .borrow_mut()
+                .borrow()
                 .push(format!("{prog} {}", args.join(" ")));
             (self.script)(prog, args, opts)
         }
@@ -305,6 +372,7 @@ mod tests {
     fn each_builtin_names_the_kind_of_node_it_implements() {
         assert_eq!(expects("prior-comments"), Some(Kind::Mechanical));
         assert_eq!(expects("changed-lint"), Some(Kind::Mechanical));
+        assert_eq!(expects("context-pack"), Some(Kind::Mechanical));
         assert_eq!(expects("codex-lens"), Some(Kind::Generator));
         assert_eq!(expects("nope"), None);
     }
@@ -354,5 +422,33 @@ mod tests {
             (3, "in", "err\n")
         );
         assert!(r.run("no-such-tool-here", &[], &Opts::default()).is_err());
+    }
+
+    #[test]
+    fn a_call_past_its_timeout_is_killed_and_a_quick_one_is_unaffected() {
+        let r = RealRunner;
+        let slow = Opts {
+            timeout: Some(Duration::from_millis(100)),
+            ..Opts::default()
+        };
+        let started = std::time::Instant::now();
+        let err = r.run("sleep", &["5".into()], &slow).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(4));
+        let quick = Opts {
+            timeout: Some(Duration::from_secs(10)),
+            ..Opts::default()
+        };
+        let out = r
+            .run(
+                "sh",
+                &["-c".into(), "echo hi; echo err >&2; exit 2".into()],
+                &quick,
+            )
+            .unwrap();
+        assert_eq!(
+            (out.code, out.stdout.as_str(), out.stderr.as_str()),
+            (2, "hi\n", "err\n")
+        );
     }
 }

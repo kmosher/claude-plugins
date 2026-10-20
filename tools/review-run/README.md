@@ -46,10 +46,11 @@ stderr. Exit codes are listed in `review-run --help`.
 ## Built-in nodes
 
 A `command` that reads `builtin:<name>` runs `review-run` itself as the node, so
-the shipped graphs need no shell, `jq` or script on `PATH`: `builtin:prior-comments`
-and `builtin:changed-lint` (mechanical) and `builtin:codex-lens` (generator). They
-call `gh`, `claude`, `lint-recipe` and `codex` when present and degrade to empty
-output when not. Any other executable still works as a node; see
+the shipped graphs need no shell, `jq`, interpreter or script on `PATH`:
+`builtin:prior-comments`, `builtin:changed-lint` and `builtin:context-pack`
+(mechanical) and `builtin:codex-lens` (generator). They call `git`, `gh`,
+`claude`, `lint-recipe`, `codex`, `go` and `curl` when present and degrade to
+empty output when not. Any other executable still works as a node; see
 `docs/review-harness.md` for the contract and the built-ins' behavior.
 
 ## Cost and time
