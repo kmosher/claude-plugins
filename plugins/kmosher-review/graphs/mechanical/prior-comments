@@ -14,6 +14,15 @@
 
 set -uo pipefail
 
+# Hand off to a newer bash when the one found on PATH is macOS's 3.2.
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] && [ -z "${PRIOR_COMMENTS_REEXEC:-}" ]; then
+  for b in /run/current-system/sw/bin/bash /opt/homebrew/bin/bash /usr/local/bin/bash; do
+    if [ -x "$b" ]; then
+      PRIOR_COMMENTS_REEXEC=1 exec "$b" "$0" "$@"
+    fi
+  done
+fi
+
 MAX_FILES="${PRIOR_COMMENTS_MAX_FILES:-10}"
 MAX_PRS="${PRIOR_COMMENTS_MAX_PRS:-5}"
 log() { echo "prior-comments: $*" >&2; }
