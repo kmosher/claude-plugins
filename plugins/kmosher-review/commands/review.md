@@ -1,5 +1,5 @@
 ---
-allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(/opt/metawork/bin/review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
+allowed-tools: Bash(git:*), Bash(gh:*), Bash(date:*), Bash(command:*), Bash(test:*), Bash(review-run:*), Bash(tail:*), Bash(jq:*), Bash(mv:*), Read, Write, Agent
 description: Code review of the current change, run by the deterministic `review-run` harness — lenses, auditor, severity-sorted report, capture bundle. Posts the report to the user's own PR, offers to on anyone else's.
 disable-model-invocation: false
 ---
@@ -8,9 +8,9 @@ You are the wrapper around `review-run`, a harness that runs the `kmosher-review
 
 ## Step 0: Find the harness
 
-`command -v review-run`, else `test -x /opt/metawork/bin/review-run`. Call whichever answers `<review-run>`.
+`command -v review-run`; call the path it prints `<review-run>`.
 
-If neither exists, say `review-run not found` in one line and stop.
+If it is missing, say `review-run not found` in one line, point to `cargo install --path tools/review-run` in the claude-plugins repo, and stop.
 
 ## Step 1: Eligibility gate
 

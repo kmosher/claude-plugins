@@ -11,6 +11,15 @@ A small public marketplace of [Claude Code](https://docs.claude.com/en/docs/clau
 /plugin install kmosher-review@kmosher
 ```
 
+The harness is a Rust program in this repo, `tools/review-run`; `/review` finds it on `PATH`. Install it from a clone:
+
+```
+git clone https://github.com/kmosher/claude-plugins && cd claude-plugins
+cargo install --path tools/review-run
+```
+
+It needs the `claude` CLI (logged in) and `git`; `gh` is used when present. See [`tools/review-run/README.md`](./tools/review-run/README.md) for flags and configuration and [`docs/review-harness.md`](./docs/review-harness.md) for the design.
+
 Then in any repo with a current branch or PR:
 
 ```
