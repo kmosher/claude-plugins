@@ -269,7 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn findings_are_normalised_and_unanchored_ones_demoted() {
+    fn findings_are_normalized_and_unanchored_ones_demoted() {
         let root = json!({"findings": [
             {"file": "a.rs", "line": 12.7, "severity": "P1", "confidence": "high",
              "category": "bug", "description": "d", "why_it_matters": "w",

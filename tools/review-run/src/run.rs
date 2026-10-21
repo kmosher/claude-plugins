@@ -2748,7 +2748,7 @@ mod tests {
     }
 
     #[test]
-    fn a_finding_on_a_github_commit_links_to_the_cited_line_and_its_neighbours() {
+    fn a_finding_on_a_github_commit_links_to_the_cited_line_and_its_neighbors() {
         let g = graph(&["code"], true);
         let ran = go_on(&g, on_github, permalink_plan(), &[]);
         let sha = "a".repeat(40);

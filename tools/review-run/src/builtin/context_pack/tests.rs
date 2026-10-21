@@ -606,7 +606,7 @@ fn the_full_node_orders_dedupes_and_escapes_its_output() {
 }
 
 #[test]
-fn output_beyond_the_cap_is_summarised() {
+fn output_beyond_the_cap_is_summarized() {
     let dir = tmp("cap");
     let ws = path_of(&dir);
     std::fs::write(dir.path().join("Makefile"), "include a.mk b.mk c.mk\n").unwrap();
