@@ -77,7 +77,7 @@ fn each(v: &Value) -> Result<Vec<&Value>, Fail> {
     }
 }
 
-/// Normalises a finding: every schema field present and well-typed, plus
+/// Normalizes a finding: every schema field present and well-typed, plus
 /// `invariant` and `verify`, with unanchored findings at low confidence.
 fn finding(f: &Map<String, Value>) -> Value {
     let get = |k: &str| f.get(k);

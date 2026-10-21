@@ -1,4 +1,4 @@
-# Removes: inline conventions (every node gets conventions = "list", the pre-inline behaviour).
+# Removes: inline conventions (every node gets conventions = "list", the pre-inline behavior).
 [defaults]
 provider = "claude"
 model = "opus"

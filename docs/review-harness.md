@@ -10,7 +10,7 @@ bookkeeping. See `tools/review-run/README.md` for installation and flags.
 ## Why a program and not a skill
 
 - **A subagent inherits the session.** Every lens starts at 67–81k tokens of
-  MCP listings, CLAUDE.md, memory and skill catalogue before it reads a line
+  MCP listings, CLAUDE.md, memory and skill catalog before it reads a line
   of the diff, and re-reads it every turn; for a 36-turn lens that base is
   ~80% of its cache reads. A `claude -p` child sheds it: no MCP block, a
   lens-specific system prompt, a short tool list. 

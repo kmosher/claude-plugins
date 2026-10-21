@@ -4,7 +4,7 @@ Another reader is running this skill's techniques 1 through 8 and 10 (upstream r
 
 Run technique 9 (reference resolution) and technique 11 (prose that describes the code), in every changed file read in full at head. Then do the sibling sweep.
 
-**Sibling sweep.** For every defect you find, or that the diff itself reveals (a rename, a moved file, a changed signature, a new required input), enumerate every other site with the same shape before you write the finding. Grep for it: the old name, the old path, the same call, the same stanza in the neighbouring file. Do not stop at the first hit. Shapes to look for:
+**Sibling sweep.** For every defect you find, or that the diff itself reveals (a rename, a moved file, a changed signature, a new required input), enumerate every other site with the same shape before you write the finding. Grep for it: the old name, the old path, the same call, the same stanza in the neighboring file. Do not stop at the first hit. Shapes to look for:
 
 - A renamed `dump.sql`, still named by a Bazel `filegroup`, a second `BUILD.bazel`, and two Python scripts. The referrers span build files and code, so grep the whole tree, not one language.
 - Two `dockerfile_lint` stages that both lack their build context, where the first one found is not the only one.

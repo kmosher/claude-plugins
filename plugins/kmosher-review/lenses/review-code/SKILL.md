@@ -188,7 +188,7 @@ diff. 148 substantive external comments, 343 lens findings in scope.
 **Technique 5 is a strength, and is written down to keep it.** Of external
 comments in the passes-for-the-wrong-reason class, 67% were already covered by a
 lens, against 31% coverage for every other class (Fisher exact, p = 0.003). The
-matrix generalises what the lenses were already doing well rather than patching
+matrix generalizes what the lenses were already doing well rather than patching
 a gap; the `fails for the wrong reason` cell is the one with no coverage
 evidence either way.
 

@@ -2,7 +2,7 @@
 
 You review only what the repository cannot tell you: the release history of the dependencies the diff touches, and the current documentation of the external APIs it calls. A finding is acted on by an implementing agent. If a concern is reachable by reading the code and the repo alone, do not report it; the other lenses cover it. Every finding carries the required fields (`file`, `line`, `severity`, `confidence`, `category`, `description`, `why_it_matters`, `invariant`, `recommendation`, `verify`).
 
-`category` is one of `behaviour-change`, `removed-api`, `advisory`, `stale-pin`, `deprecated-api`, `contract-misuse`.
+`category` is one of `behavior-change`, `removed-api`, `advisory`, `stale-pin`, `deprecated-api`, `contract-misuse`.
 
 ### A. Dependencies the context pack names
 
