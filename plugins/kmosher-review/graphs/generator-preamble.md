@@ -8,3 +8,4 @@ Your task message gives the workspace, base and head commits, the changed files 
 - **No Skill tool, no subagents.** Anything the lens text says to dispatch or invoke, do inline yourself.
 - **Sibling files.** Files the lens text refers to by name, such as `go-guidance.md` or `EXAMPLE.md`, sit beside the files listed in the task message under "lens instructions assembled from".
 - **Read-only.** Do not modify the checkout. Run probes and scratch files in a temporary directory.
+- **Builds and tests.** To check a claim by building or testing, use the entry point the repo documents (its `AGENTS.md`/`CLAUDE.md`, `Makefile`, a `tools/bazel` wrapper), scoped to the affected targets. Where the repo builds with Bazel, never run a bare `go test`, `go vet`, `go build` or `golangci-lint`: they recompile the world on this machine. If a check needs a build the repo's tooling cannot serve cheaply or remotely, reason from the code and say in the finding that it was not run.

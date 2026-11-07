@@ -24,8 +24,9 @@ issues that *also* hurt legibility (unused identifiers, dead code branches,
 modernize hints) should be caught by tooling, not human judgment. Defer those
 to:
 
-- **Go**: `mcp__gopls__go_diagnostics` (gopls MCP) and `staticcheck` for
-  unused-code / simplification findings.
+- **Go**: `mcp__gopls__go_diagnostics` (gopls MCP) for unused-code /
+  simplification findings, or the repo's own lint target; `staticcheck`
+  only where the repo does not build with Bazel.
 - **TypeScript**: ESLint with the project config; `tsc --noEmit` for unused
   imports/locals if `noUnusedLocals` is on.
 - **Rust**: `cargo clippy` for `complexity` and `style` lints.

@@ -76,8 +76,8 @@ The cost objection is real but narrower than it looks. Standing up an
 environment is expensive; invoking one binary with three inputs is about two
 minutes and no sandbox. The line is *scope*, not run-versus-read:
 
-- **Cheap, do it:** `go install`/`pip install`/`npx` one tool and run it against
-  a throwaway fixture. Calling one function in a REPL. Running the project's own
+- **Cheap, do it:** `pip install`/`npx` one tool (or fetch a prebuilt binary) and run it against
+  a throwaway fixture; `go install` compiles it locally, so prefer a binary already on `PATH`. Calling one function in a REPL. Running the project's own
   test for the single case in question.
 - **Expensive, don't:** standing up the service, seeding a database, running the
   full suite, reproducing CI.

@@ -153,7 +153,7 @@ Reasoning about code is the weakest evidence this skill produces; execution is
 the strongest, and the reviewers that beat this suite in the corpus are the
 ones that ran things. Before writing any finding of the form "X would fail
 when Y", try to make it fail: run the project's tests for the changed
-packages, run the new script against the edge input, write a throwaway
+packages through its documented entry point, run the new script against the edge input, write a throwaway
 fixture that exercises the claim. A claim you could have falsified and did not
 is reported at `confidence: low`, and says so.
 

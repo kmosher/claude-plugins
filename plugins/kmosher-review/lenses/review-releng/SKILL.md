@@ -25,7 +25,8 @@ If unsure: ask "if this is wrong in subtle ways, how does the org find out, and 
 
 Operational readiness is judgment-heavy, but mechanical checks back it up:
 
-- **CI lint/build green** — verify `make lint`, the project's typecheck, or
+- **CI lint/build green** — verify the project's documented lint target (`make lint`, or its Bazel
+  equivalent), its typecheck, or
   the language LSP MCP (`mcp__gopls__go_diagnostics`, etc.) are clean on the
   changed code. A failing lint pre-deploy is a paging risk.
 - **IaC preview** (`pulumi preview --json`, `terraform plan -json`, `cdk diff`)

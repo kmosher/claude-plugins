@@ -34,8 +34,10 @@ Migration review is mostly judgment, but a few automated checks back it up:
   similar IDLs, run the project's codegen target (often `make generate` or
   `buf generate`) and check that the committed generated code matches the
   schema. Drift is a deploy hazard.
-- **Type-check across the boundary**: run `tsc --noEmit`, `cargo check`, or
-  `go build ./...` after the change, especially for client/server contract
+- **Type-check across the boundary**: run the project's own type-check or
+  build target scoped to the affected packages (`tsc --noEmit`, `cargo check`,
+  or the repo's documented Go entry point; a bare `go build ./...` in a
+  Bazel repo recompiles everything), especially for client/server contract
   changes — type errors here are usually the first symptom of an unsafe
   shape change.
 - **DB migration linters** (project-specific): `sqitch verify`, `atlas migrate
