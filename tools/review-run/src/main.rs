@@ -74,6 +74,14 @@ struct Cli {
     /// that has already been reviewed on GitHub, so they cannot read the review.
     #[arg(long)]
     no_gh: bool,
+    /// A file of permission rules, one per line (`Bash(go vet:*)`; blank lines and `#` lines
+    /// ignored), that no node's Bash tool may run. Passed to `claude` as `--disallowedTools`.
+    #[arg(long, value_name = "FILE")]
+    deny_tools_file: Option<PathBuf>,
+    /// A file whose text ends the system prompt of every node that has a Bash tool. For telling
+    /// reviewers why `--deny-tools-file` refuses what it does and what to run instead.
+    #[arg(long, value_name = "FILE")]
+    notice_file: Option<PathBuf>,
     /// How many nodes run at once.
     #[arg(long, default_value_t = 4)]
     concurrency: usize,
@@ -671,8 +679,21 @@ fn real_main(cli: &Cli) -> Result<Option<bool>, String> {
         no_prewarm: cli.no_prewarm,
         no_gh,
     };
+    let read =
+        |p: &PathBuf| std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()));
+    let deny = match &cli.deny_tools_file {
+        Some(p) => read(p)?
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .map(String::from)
+            .collect(),
+        None => Vec::new(),
+    };
     let claude = Claude {
         bin: cli.claude_bin.clone(),
+        deny,
+        notice: cli.notice_file.as_ref().map(read).transpose()?,
     };
     let providers = Providers {
         claude: &claude,
@@ -806,6 +827,7 @@ mod tests {
         };
         let claude = Claude {
             bin: "claude".into(),
+            ..Default::default()
         };
         let providers = Providers {
             claude: &claude,

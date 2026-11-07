@@ -206,8 +206,16 @@ fn attempt_file(inv: &Invocation, stem: &str, ext: &str) -> std::path::PathBuf {
 
 /// `claude -p`, cold: no MCP servers, no CLAUDE.md, no plugins, skills or
 /// hooks, and a system prompt that is the lens and nothing else.
+#[derive(Default)]
 pub struct Claude {
     pub bin: String,
+    /// Permission rules every child is denied, such as `Bash(go vet:*)`, passed as
+    /// `--disallowedTools`. Deny rules are the one restriction that reaches the Bash tool of
+    /// a `--safe-mode` child: safe mode turns hooks off, `--settings` hooks included.
+    pub deny: Vec<String>,
+    /// Told to every child that has a Bash tool, at the end of its system prompt: what the
+    /// deny rules are for, and what to do instead, since the refusal says only "denied".
+    pub notice: Option<String>,
 }
 
 /// A skill or agent file is a prompt with YAML frontmatter the harness that
@@ -244,8 +252,15 @@ fn compose_files(paths: &[std::path::PathBuf]) -> Result<String, String> {
 }
 
 impl Claude {
-    fn system_prompt(&self, inv: &Invocation) -> Result<String, String> {
-        compose_system_prompt(inv.node)
+    pub(crate) fn system_prompt(&self, inv: &Invocation) -> Result<String, String> {
+        let mut sp = compose_system_prompt(inv.node)?;
+        if let Some(n) = &self.notice {
+            if inv.node.tools.iter().any(|t| t == "Bash") {
+                sp.push_str(n.trim_end());
+                sp.push_str("\n\n");
+            }
+        }
+        Ok(sp)
     }
 }
 
@@ -301,6 +316,10 @@ impl Provider for Claude {
             "--tools".into(),
             inv.node.tools.join(","),
         ]);
+        if !self.deny.is_empty() {
+            argv.push("--disallowedTools".into());
+            argv.extend(self.deny.iter().cloned());
+        }
         Ok(argv)
     }
 

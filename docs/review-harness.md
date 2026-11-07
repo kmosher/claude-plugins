@@ -322,6 +322,16 @@ manifest flags each mechanical node's record with a warning. The manifest has
 setting. Not covered: anything else a child can reach on its own, such as `curl`
 to a public repository's API or a credential read from the keychain.
 
+`--deny-tools-file <file>` names permission rules, one per line (`Bash(go vet:*)`,
+`Bash(* go test *)`), that no node's Bash tool may run; they reach every child as
+`--disallowedTools`. `--notice-file <file>` ends the system prompt of every node
+that has a Bash tool with the file's text, because a denied command's error says
+only "permission denied", not why or what to run instead. The bench uses the pair
+to keep reviewers from compiling locally. Deny rules are the restriction that
+reaches a `--safe-mode` child: safe mode turns hooks off, `--settings` hooks
+included, and a `PATH` shim loses to a shell profile that re-orders `PATH`. A rule
+sees the command line, not what a script it runs does.
+
 `LSP` is accepted in `tools`, but children start with `--safe-mode`, which
 loads no plugins and so no language server; the tool is not usable there.
 
@@ -399,7 +409,8 @@ ends; a reader that treats a manifest as a finished run must check that field.
 review-run --base <commit> [--head <commit>] [--graph <file|name>] [--workspace <dir>]
            [--skip <node>] [--model <node>=<model>] [--effort <node>=<level>]
            [--reuse-from <bundle> | --resume <bundle>] [--pr <number>]
-           [--no-prewarm] [--no-gh] [--if-changed] [--concurrency <n>]
+           [--no-prewarm] [--no-gh] [--deny-tools-file <file>] [--notice-file <file>]
+           [--if-changed] [--concurrency <n>]
            [--out <dir>] [--dry-run] [--json]
 ```
 

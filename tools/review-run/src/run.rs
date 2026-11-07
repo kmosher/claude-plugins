@@ -5557,6 +5557,7 @@ mod tests {
         let g = fork_graph(&dir, "opus");
         let claude = Claude {
             bin: "claude".into(),
+            ..Default::default()
         };
         let schema = generator_schema();
         let bundle = dir.join("bundle");
@@ -5622,6 +5623,53 @@ mod tests {
             vec![("CLAUDE_CODE_PROMPT_CACHE_TTL", "1h")]
         );
         assert!(cold(&g.unforked(g.node("a").unwrap())).is_empty());
+    }
+
+    #[test]
+    fn deny_rules_and_the_notice_reach_only_the_nodes_that_can_run_a_command() {
+        use crate::provider::Claude;
+        let dir = scratch();
+        std::fs::write(dir.join("lens.md"), "LENS.\n").unwrap();
+        let text = "[defaults]\nprovider = \"claude\"\nmodel = \"opus\"\ntools = [\"Read\"]\n\
+                    [[node]]\nname = \"shell\"\nkind = \"generator\"\ntools = [\"Bash\", \"Read\"]\nsystem_prompt = [\"lens.md\"]\n\
+                    [[node]]\nname = \"reader\"\nkind = \"generator\"\nsystem_prompt = [\"lens.md\"]\n";
+        let g = Graph::parse(text, &dir, "deny").unwrap();
+        let claude = Claude {
+            bin: "claude".into(),
+            deny: vec!["Bash(go vet:*)".into(), "Bash(* go test *)".into()],
+            notice: Some("No local builds.\n".into()),
+        };
+        let schema = generator_schema();
+        let inv = |node: &'static str| Invocation {
+            node: g.node(node).unwrap(),
+            workspace: &dir,
+            prompt: "",
+            schema: &schema,
+            dir: &dir,
+            attempt: 1,
+            resume: None,
+            fork: false,
+            verbatim: false,
+            no_gh: None,
+        };
+        let argv = claude.command(&inv("shell")).unwrap();
+        let at = argv.iter().position(|a| a == "--disallowedTools").unwrap();
+        assert_eq!(
+            argv[at..],
+            ["--disallowedTools", "Bash(go vet:*)", "Bash(* go test *)"]
+        );
+        assert_eq!(argv[at - 2..at], ["--tools", "Bash,Read"]);
+        assert_eq!(
+            claude.system_prompt(&inv("shell")).unwrap(),
+            "LENS.\n\nNo local builds.\n\n"
+        );
+        assert_eq!(claude.system_prompt(&inv("reader")).unwrap(), "LENS.\n\n");
+        let none = Claude::default();
+        assert!(!none
+            .command(&inv("shell"))
+            .unwrap()
+            .iter()
+            .any(|a| a == "--disallowedTools"));
     }
 
     #[test]
