@@ -583,6 +583,38 @@ mod tests {
     const GEN: &str = "provider = \"command\"\ncommand = [\"true\"]\n";
 
     #[test]
+    fn every_shipped_graph_loads_and_a_spot_sample_has_one_critic_instance_per_reader() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/kmosher-review/graphs");
+        let mut seen = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_some_and(|x| x == "toml") {
+                Graph::load(&p).unwrap_or_else(|e| panic!("{e}"));
+                seen += 1;
+            }
+        }
+        assert!(seen > 0);
+        for n in [2, 3] {
+            let g = Graph::load(&dir.join(format!("spot-x{n}.toml"))).unwrap();
+            let readers: Vec<&str> = g
+                .nodes
+                .iter()
+                .filter(|x| x.kind == Kind::Generator)
+                .map(|x| x.name.as_str())
+                .collect();
+            assert_eq!(readers.len(), n);
+            let auditor = g.node("auditor").unwrap();
+            assert!(auditor.per_need);
+            assert_eq!(auditor.needs, readers);
+            assert!(g.nodes.iter().filter(|x| x.kind == Kind::Generator).all(|x| {
+                x.model == g.node(readers[0]).unwrap().model
+                    && x.effort == g.node(readers[0]).unwrap().effort
+                    && x.system_prompt == g.node(readers[0]).unwrap().system_prompt
+            }));
+        }
+    }
+
+    #[test]
     fn defaults_fill_what_a_node_leaves_out() {
         let g = parse(&format!(
             "[defaults]\nmodel = \"opus\"\ntimeout = 60\n[[node]]\nname = \"a\"\nkind = \"generator\"\n{GEN}\

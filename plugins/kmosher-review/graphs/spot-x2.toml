@@ -1,0 +1,43 @@
+# The spot-sample graph: 2 independent Sonnet code readers at medium effort, findings unioned and deduplicated.
+# Buys recall with cheap samples of the spot-check reader; each sample is its own lens, so a finding stays attributable.
+[defaults]
+provider = "claude"
+model = "sonnet"
+tools = ["Bash", "Read", "Grep", "Glob"]
+timeout = 1800
+conventions = "inline"
+
+[[node]]
+name = "lint"
+kind = "mechanical"
+provider = "command"
+command = ["builtin:changed-lint"]
+timeout = 600
+
+[[node]]
+name = "code-1"
+kind = "generator"
+effort = "medium"
+system_prompt = ["generator-preamble.md", "../lenses/SHARED_CONVENTIONS.md", "../lenses/review-code/SKILL.md"]
+
+[[node]]
+name = "code-2"
+kind = "generator"
+effort = "medium"
+system_prompt = ["generator-preamble.md", "../lenses/SHARED_CONVENTIONS.md", "../lenses/review-code/SKILL.md"]
+
+[[node]]
+name = "auditor"
+kind = "critic"
+model = "haiku"
+effort = "medium"
+needs = ["code-1", "code-2"]
+per_need = true
+system_prompt = ["auditor.md"]
+
+[[node]]
+name = "dedupe"
+kind = "merger"
+model = "haiku"
+tools = []
+system_prompt = ["merger.md"]
