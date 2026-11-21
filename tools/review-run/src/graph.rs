@@ -615,6 +615,42 @@ mod tests {
     }
 
     #[test]
+    fn every_ablation_graph_loads_and_the_cost_arms_differ_where_they_claim() {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/kmosher-review/graphs/ablation");
+        let mut seen = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.extension().is_some_and(|x| x == "toml") {
+                Graph::load(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+                seen += 1;
+            }
+        }
+        assert!(seen > 0);
+        let load = |n: &str| Graph::load(&dir.join(n)).unwrap();
+        let model = |g: &Graph, n: &str| g.node(n).unwrap().model.clone();
+
+        let fast = load("fast.toml");
+        let g = load("fast-opus-code.toml");
+        assert_eq!(model(&g, "code").as_deref(), Some("opus"));
+        assert_eq!(model(&fast, "code").as_deref(), Some("sonnet"));
+        assert_eq!(g.node("code").unwrap().effort, fast.node("code").unwrap().effort);
+        assert_eq!(g.nodes.len(), fast.nodes.len());
+
+        let g = load("fast-trim.toml");
+        assert!(g.node("code-resolve").is_none() && g.node("compliance").is_none());
+        let auditor = g.node("auditor").unwrap();
+        assert!(!auditor.needs.iter().any(|n| n == "code-resolve" || n == "compliance"));
+        assert_eq!(g.nodes.len(), fast.nodes.len() - 2);
+
+        let g = load("default-sonnet-side.toml");
+        assert_eq!(model(&g, "releng").as_deref(), Some("sonnet"));
+        assert_eq!(model(&g, "compatibility").as_deref(), Some("sonnet"));
+        for n in ["code", "legibility"] {
+            assert_eq!(model(&g, n).as_deref(), Some("opus"));
+        }
+    }
+
+    #[test]
     fn defaults_fill_what_a_node_leaves_out() {
         let g = parse(&format!(
             "[defaults]\nmodel = \"opus\"\ntimeout = 60\n[[node]]\nname = \"a\"\nkind = \"generator\"\n{GEN}\
